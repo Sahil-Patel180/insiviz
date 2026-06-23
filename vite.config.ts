@@ -1,16 +1,17 @@
-import { defineConfig } from 'vite'
-import path from 'path'
+import { defineConfig, type Plugin } from 'vite'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 
+const fromProjectRoot = (relativePath: string) =>
+  new URL(relativePath, import.meta.url).pathname
 
-function figmaAssetResolver() {
+function figmaAssetResolver(): Plugin {
   return {
     name: 'figma-asset-resolver',
-    resolveId(id) {
+    resolveId(id: string) {
       if (id.startsWith('figma:asset/')) {
         const filename = id.replace('figma:asset/', '')
-        return path.resolve(__dirname, 'src/assets', filename)
+        return fromProjectRoot(`src/assets/${filename}`)
       }
     },
   }
@@ -27,7 +28,7 @@ export default defineConfig({
   resolve: {
     alias: {
       // Alias @ to the src directory
-      '@': path.resolve(__dirname, './src'),
+      '@': fromProjectRoot('./src'),
     },
   },
   server: {

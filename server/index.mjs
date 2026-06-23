@@ -1,4 +1,4 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 import crypto from "node:crypto";
 import { createServer } from "node:http";
 import bcrypt from "bcryptjs";
@@ -14,6 +14,9 @@ import {
   setResetTokenRecord,
   updatePasswordForEmail,
 } from "./auth-store.js";
+
+dotenv.config({ path: ".env.local" });
+dotenv.config();
 
 const port = Number(process.env.AUTH_PORT ?? 8787);
 const otpExpiryMs = 10 * 60 * 1000;
@@ -137,8 +140,7 @@ async function handleResetPassword(req, res) {
     return;
   }
 
-  const passwordHash = await bcrypt.hash(String(newPassword), 10);
-  const updated = await updatePasswordForEmail(resetTokenRecord.email, passwordHash);
+  const updated = await updatePasswordForEmail(resetTokenRecord.email, String(newPassword));
 
   if (!updated) {
     sendJson(res, 200, { success: false });
