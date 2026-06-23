@@ -44,12 +44,11 @@ export default function App() {
 
       {activePage === "ForgotPassword" && (
         <ForgotPasswordPage
-          onHome={() => setActivePage("Home")}
           onLogin={() => setActivePage("Login")}
         />
       )}
 
-      {activePage !== "Services" && activePage !== "About" && activePage !== "Blog" && activePage !== "Login" && <>
+      {activePage !== "Services" && activePage !== "About" && activePage !== "Blog" && activePage !== "Login" && activePage !== "ForgotPassword" && <>
 
       {/* ── HERO SECTION ── */}
       <section

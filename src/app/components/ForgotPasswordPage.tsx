@@ -2,6 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { AsciiBackground } from "./AsciiBackground";
+import {
+  requestForgotPassword,
+  requestOtpVerification,
+  requestPasswordReset,
+} from "../lib/auth";
 
 const A = "#7affc8";
 const AR = "122,255,200";
@@ -14,8 +19,6 @@ const mono = "'JetBrains Mono', monospace";
 const share = "'Share Tech Mono', monospace";
 const syncopate = "'Syncopate', sans-serif";
 const orbitron = "'Orbitron', sans-serif";
-
-const DEMO_OTP = "246810";
 
 function AuthInput({
   type,
@@ -153,14 +156,11 @@ function OtpBox({
 }
 
 function ResetCard({
-  onHome,
   onLogin,
 }: {
-  onHome: () => void;
   onLogin: () => void;
 }) {
   const [screen, setScreen] = useState<1 | 2 | 3>(1);
-
   const [email, setEmail] = useState("");
   const [sendState, setSendState] = useState<"idle" | "sending" | "sent">("idle");
 
@@ -172,6 +172,7 @@ function ResetCard({
   const [verifyState, setVerifyState] = useState<"idle" | "verifying">("idle");
   const [resendAt, setResendAt] = useState(() => Date.now() + 30000);
   const [resendTick, setResendTick] = useState(0);
+  const [resetToken, setResetToken] = useState("");
 
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -184,10 +185,10 @@ function ResetCard({
   const verifyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const otpResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const passwordTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const verifyRequestIdRef = useRef(0);
 
-  const resendSeconds = useMemo(() => {
-    return Math.max(0, Math.ceil((resendAt - Date.now()) / 1000));
-  }, [resendAt, resendTick]);
+  const resendSeconds = useMemo(() => Math.max(0, Math.ceil((resendAt - Date.now()) / 1000)), [resendAt, resendTick]);
+  const normalizedEmail = email.trim().toLowerCase();
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -200,14 +201,14 @@ function ResetCard({
   useEffect(() => {
     if (screen !== 2) return;
 
-    const first = otpRefs.current[0];
-    first?.focus();
+    otpRefs.current[0]?.focus();
     setOtpFocused(0);
     setOtp(Array(6).fill(""));
     setOtpError(false);
     setOtpSuccess(false);
     setOtpShake(false);
     setVerifyState("idle");
+    setResetToken("");
     setResendAt(Date.now() + 30000);
     setResendTick((current) => current + 1);
   }, [screen]);
@@ -223,53 +224,83 @@ function ResetCard({
     if (screen !== 2) return;
     if (otp.some((digit) => !digit) || verifyState !== "idle") return;
 
+    const requestId = verifyRequestIdRef.current + 1;
+    verifyRequestIdRef.current = requestId;
+
+    if (verifyTimerRef.current) window.clearTimeout(verifyTimerRef.current);
     verifyTimerRef.current = window.setTimeout(() => {
       setVerifyState("verifying");
 
-      window.setTimeout(() => {
-        const code = otp.join("");
+      void requestOtpVerification(normalizedEmail, otp.join(""))
+        .then((response) => {
+          if (verifyRequestIdRef.current !== requestId) {
+            return;
+          }
 
-        if (code === DEMO_OTP) {
+          if (!response.success || !response.resetToken) {
+            throw new Error("Invalid OTP.");
+          }
+
           setOtpError(false);
           setOtpSuccess(true);
-          window.setTimeout(() => setScreen(3), 260);
-          return;
-        }
+          setResetToken(response.resetToken);
+          setVerifyState("idle");
 
-        setOtpSuccess(false);
-        setOtpError(true);
-        setOtpShake(true);
-        setOtp(Array(6).fill(""));
-        setVerifyState("idle");
+          window.setTimeout(() => setScreen(3), 220);
+        })
+        .catch(() => {
+          if (verifyRequestIdRef.current !== requestId) {
+            return;
+          }
 
-        otpResetTimerRef.current = window.setTimeout(() => {
-          setOtpError(false);
-          setOtpShake(false);
-          otpRefs.current[0]?.focus();
-          setOtpFocused(0);
-        }, 220);
-      }, 150);
-    }, 150);
+          setOtpSuccess(false);
+          setOtpError(true);
+          setOtpShake(true);
+          setOtp(Array(6).fill(""));
+          setVerifyState("idle");
+
+          otpResetTimerRef.current = window.setTimeout(() => {
+            setOtpError(false);
+            setOtpShake(false);
+            otpRefs.current[0]?.focus();
+            setOtpFocused(0);
+          }, 220);
+        });
+    }, 120);
 
     return () => {
       if (verifyTimerRef.current) window.clearTimeout(verifyTimerRef.current);
     };
-  }, [otp, screen, verifyState]);
+  }, [normalizedEmail, otp, screen, verifyState]);
 
   const goToOtp = () => {
     setScreen(2);
   };
 
-  const handleSendOtp = (event: React.FormEvent) => {
+  const handleSendOtp = async (event: React.FormEvent) => {
     event.preventDefault();
     if (sendState === "sending") return;
 
+    if (!normalizedEmail) {
+      toast.error("Enter an email address first.");
+      return;
+    }
+
     setSendState("sending");
-    if (sendTimerRef.current) window.clearTimeout(sendTimerRef.current);
-    sendTimerRef.current = window.setTimeout(() => {
-      setSendState("sent");
-      window.setTimeout(() => goToOtp(), 260);
-    }, 700);
+
+    try {
+      const response = await requestForgotPassword(normalizedEmail);
+      toast.success(response.message ?? "If this email exists, an OTP has been sent.");
+
+      if (sendTimerRef.current) window.clearTimeout(sendTimerRef.current);
+      sendTimerRef.current = window.setTimeout(() => {
+        setSendState("sent");
+        goToOtp();
+      }, 180);
+    } catch {
+      setSendState("idle");
+      toast.error("Unable to start the reset flow.");
+    }
   };
 
   const handleOtpChange = (index: number, rawValue: string) => {
@@ -310,22 +341,38 @@ function ResetCard({
     }
   };
 
-  const handleResend = () => {
-    if (resendSeconds > 0) return;
+  const handleResend = async () => {
+    if (resendSeconds > 0 || sendState === "sending" || verifyState === "verifying" || !normalizedEmail) return;
 
-    setResendAt(Date.now() + 30000);
-    setResendTick((current) => current + 1);
-    setOtp(Array(6).fill(""));
-    setOtpError(false);
-    setOtpSuccess(false);
-    setVerifyState("idle");
-    otpRefs.current[0]?.focus();
-    setOtpFocused(0);
+    try {
+      await requestForgotPassword(normalizedEmail);
+      toast.success("If this email exists, an OTP has been sent.");
+
+      setResendAt(Date.now() + 30000);
+      setResendTick((current) => current + 1);
+      setOtp(Array(6).fill(""));
+      setOtpError(false);
+      setOtpSuccess(false);
+      setOtpShake(false);
+      setVerifyState("idle");
+      setResetToken("");
+      otpRefs.current[0]?.focus();
+      setOtpFocused(0);
+    } catch {
+      toast.error("Unable to resend the code.");
+    }
   };
 
-  const handleUpdatePassword = (event: React.FormEvent) => {
+  const handleUpdatePassword = async (event: React.FormEvent) => {
     event.preventDefault();
     if (passwordState === "saving") return;
+
+    if (!resetToken) {
+      toast.error("Verification expired. Request a new code.");
+      setPasswordShake(true);
+      window.setTimeout(() => setPasswordShake(false), 260);
+      return;
+    }
 
     if (!newPassword || newPassword !== confirmPassword) {
       setPasswordShake(true);
@@ -334,11 +381,24 @@ function ResetCard({
     }
 
     setPasswordState("saving");
-    if (passwordTimerRef.current) window.clearTimeout(passwordTimerRef.current);
-    passwordTimerRef.current = window.setTimeout(() => {
+
+    try {
+      const response = await requestPasswordReset(resetToken, newPassword);
+      if (!response.success) {
+        throw new Error("Password reset failed.");
+      }
+
       toast.success("Password updated. Log in with your new credentials.");
-      onLogin();
-    }, 700);
+      if (passwordTimerRef.current) window.clearTimeout(passwordTimerRef.current);
+      passwordTimerRef.current = window.setTimeout(() => {
+        onLogin();
+      }, 500);
+    } catch {
+      setPasswordState("idle");
+      setPasswordShake(true);
+      window.setTimeout(() => setPasswordShake(false), 260);
+      toast.error("Unable to update password.");
+    }
   };
 
   const emailButtonLabel = sendState === "sending" ? "SENDING..." : sendState === "sent" ? "SENT ✓" : "SEND_OTP →";
@@ -405,21 +465,6 @@ function ResetCard({
           boxSizing: "border-box",
         }}
       >
-        <div style={{ marginBottom: "24px", cursor: "pointer" }} onClick={onHome}>
-          <span
-            style={{
-              fontFamily: orbitron,
-              fontWeight: 800,
-              fontSize: "0.82rem",
-              letterSpacing: "0.08em",
-              color: A,
-              textShadow: `0 0 12px rgba(${AR},0.3)`,
-            }}
-          >
-            INSI<span style={{ color: "#3a3a45", fontWeight: 400 }}>VIZ</span>
-          </span>
-        </div>
-
         <div style={{ marginBottom: "22px", textAlign: "center" }}>
           <div
             style={{
@@ -460,7 +505,7 @@ function ResetCard({
                 textAlign: "center",
               }}
             >
-              If that email&apos;s actually in our system, an OTP&apos;s on its way. If not... nothing happens. We&apos;re not telling either way 😄
+              If this email exists, an OTP&apos;s on its way. Either way, the response stays the same.
             </p>
 
             <AuthInput
@@ -510,7 +555,7 @@ function ResetCard({
                 textAlign: "center",
               }}
             >
-              Enter the code — it verifies itself.
+              Enter the 6-digit code. It verifies itself on the last digit.
             </p>
 
             <motion.div
@@ -551,15 +596,15 @@ function ResetCard({
               <button
                 type="button"
                 onClick={handleResend}
-                disabled={resendSeconds > 0}
+                disabled={resendSeconds > 0 || sendState === "sending"}
                 style={{
                   fontFamily: share,
                   fontSize: "0.62rem",
                   letterSpacing: "0.14em",
                   border: "none",
                   background: "transparent",
-                  cursor: resendSeconds > 0 ? "not-allowed" : "pointer",
-                  color: resendSeconds > 0 ? "rgba(122,255,200,0.22)" : `rgba(${AR},0.62)`,
+                  cursor: resendSeconds > 0 || sendState === "sending" ? "not-allowed" : "pointer",
+                  color: resendSeconds > 0 || sendState === "sending" ? "rgba(122,255,200,0.22)" : `rgba(${AR},0.62)`,
                   padding: 0,
                 }}
               >
@@ -642,6 +687,6 @@ function ResetCard({
   );
 }
 
-export function ForgotPasswordPage({ onHome, onLogin }: { onHome: () => void; onLogin: () => void }) {
-  return <ResetCard onHome={onHome} onLogin={onLogin} />;
+export function ForgotPasswordPage({ onLogin }: { onLogin: () => void }) {
+  return <ResetCard onLogin={onLogin} />;
 }
