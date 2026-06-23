@@ -8,7 +8,9 @@ import { ServicesPage } from "./components/ServicesPage";
 import { AboutPage } from "./components/AboutPage";
 import { BlogPage } from "./components/BlogPage";
 import { LoginPage } from "./components/LoginPage";
+import { ForgotPasswordPage } from "./components/ForgotPasswordPage";
 import { Footer } from "./components/Footer";
+import { Toaster } from "./components/ui/sonner";
 
 export default function App() {
   const [activePage, setActivePage] = useState("Home");
@@ -18,6 +20,7 @@ export default function App() {
       className="min-h-screen w-full"
       style={{ background: "#0d0d0f", overflowX: "hidden" }}
     >
+      <Toaster richColors closeButton position="top-center" />
       <Navbar activePage={activePage} onNavigate={setActivePage} />
 
       {activePage === "Services" && (
@@ -33,7 +36,17 @@ export default function App() {
       )}
 
       {activePage === "Login" && (
-        <LoginPage onHome={() => setActivePage("Home")} />
+        <LoginPage
+          onHome={() => setActivePage("Home")}
+          onForgotPassword={() => setActivePage("ForgotPassword")}
+        />
+      )}
+
+      {activePage === "ForgotPassword" && (
+        <ForgotPasswordPage
+          onHome={() => setActivePage("Home")}
+          onLogin={() => setActivePage("Login")}
+        />
       )}
 
       {activePage !== "Services" && activePage !== "About" && activePage !== "Blog" && activePage !== "Login" && <>

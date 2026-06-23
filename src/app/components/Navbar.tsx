@@ -13,6 +13,7 @@ export function Navbar({ activePage, onNavigate }: NavbarProps) {
   const setActive = onNavigate;
   const [hovered, setHovered]   = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const isAuthPage = activePage === "Login" || activePage === "ForgotPassword";
 
   // pill geometry for the sliding indicator
   const [pillStyle, setPillStyle] = useState({ left: 0, width: 0 });
@@ -162,7 +163,7 @@ export function Navbar({ activePage, onNavigate }: NavbarProps) {
       </div>
 
       {/* Login — hidden on the login page itself */}
-      <div className={`hidden md:block ${activePage === "Login" ? "invisible pointer-events-none" : ""}`}>
+      <div className={`hidden md:block ${isAuthPage ? "invisible pointer-events-none" : ""}`}>
         <button
           onClick={() => setActive("Login")}
           onMouseEnter={(e) => {
@@ -240,7 +241,7 @@ export function Navbar({ activePage, onNavigate }: NavbarProps) {
           }}
         >
           {[...NAV_LINKS, "Login"].filter((link) =>
-            !(link === "Login" && activePage === "Login")
+            !(link === "Login" && isAuthPage)
           ).map((link) => (
             <button
               key={link}

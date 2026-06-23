@@ -159,7 +159,13 @@ function FormInput({
 }
 
 // ─── main page ────────────────────────────────────────────────────────────────
-export function LoginPage({ onHome }: { onHome: () => void }) {
+export function LoginPage({
+  onHome,
+  onForgotPassword,
+}: {
+  onHome: () => void;
+  onForgotPassword: () => void;
+}) {
   const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
   const [focused, setFocused]   = useState<"email" | "password" | null>(null);
@@ -382,6 +388,7 @@ export function LoginPage({ onHome }: { onHome: () => void }) {
               cursor: "pointer",
               transition: "color 0.18s ease",
             }}
+            onClick={onForgotPassword}
             onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = `rgba(${AR},0.65)`)}
             onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = `rgba(${AR},0.3)`)}
           >
