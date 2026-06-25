@@ -1,7 +1,7 @@
 import { useState, useRef, useLayoutEffect } from "react";
 import { motion } from "motion/react";
 
-const NAV_LINKS = ["Home", "Services", "About", "Blog"];
+const NAV_LINKS = ["Home", "Services", "Pricing", "About", "Blog"];
 
 interface NavbarProps {
   activePage: string;

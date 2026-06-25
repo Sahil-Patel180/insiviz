@@ -5,6 +5,7 @@ import { Navbar } from "./components/Navbar";
 import { ServicesSection } from "./components/ServicesSection";
 import { AboutSection } from "./components/AboutSection";
 import { ServicesPage } from "./components/ServicesPage";
+import { PricingPage } from "./components/PricingPage";
 import { AboutPage } from "./components/AboutPage";
 import { BlogPage } from "./components/BlogPage";
 import { LoginPage } from "./components/LoginPage";
@@ -27,6 +28,10 @@ export default function App() {
         <ServicesPage onHome={() => setActivePage("Home")} />
       )}
 
+      {activePage === "Pricing" && (
+        <PricingPage onHome={() => setActivePage("Home")} />
+    )}
+
       {activePage === "About" && (
         <AboutPage onHome={() => setActivePage("Home")} />
       )}
@@ -48,7 +53,7 @@ export default function App() {
         />
       )}
 
-      {activePage !== "Services" && activePage !== "About" && activePage !== "Blog" && activePage !== "Login" && activePage !== "ForgotPassword" && <>
+      {activePage !== "Services" && activePage !== "Pricing" && activePage !== "About" && activePage !== "Blog" && activePage !== "Login" && activePage !== "ForgotPassword" && <>
 
       {/* ── HERO SECTION ── */}
       <section
