@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { AsciiBackground } from "./AsciiBackground";
+import { signIn } from "../lib/auth";
 
 const A      = "#7affc8";
 const AR     = "122,255,200";
@@ -162,9 +163,11 @@ function FormInput({
 export function LoginPage({
   onHome,
   onForgotPassword,
+  onLoginSuccess,
 }: {
   onHome: () => void;
   onForgotPassword: () => void;
+  onLoginSuccess: (profile: import("../lib/auth").Profile) => void;
 }) {
   const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
@@ -219,12 +222,29 @@ export function LoginPage({
     }, 1400);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim())    { triggerError("email");    return; }
     if (!password.trim()) { triggerError("password"); return; }
+    
     // submit logic here
-    console.log("Login submitted:", email);
+    setFormError(null);
+    setSubmitting(true);
+    const result = await signIn(email.trim(), password);
+    setSubmitting(false);
+
+    if (!result.success) {
+      setFormError(result.message);
+      triggerError("email");
+      triggerError("password");
+      return;
+    }
+
+    onLoginSuccess(result.profile);
+    // console.log("Login submitted:", email);
   };
 
   return (
@@ -372,9 +392,16 @@ export function LoginPage({
               transition: "box-shadow 0.2s ease",
               minHeight: "48px",
             }}
+            disabled={submitting}
           >
-            LOG_IN →
+            {/* LOG_IN → */}
+            {submitting ? "LOGGING_IN …" : "LOG_IN →"}
           </motion.button>
+          {formError && (
+            <p style={{ fontFamily: share, fontSize: "0.68rem", color: 'rgba(${RED},0.85)', textAlign: "center", margin: "4px 0 0" }}>
+              {formError}
+            </p>
+          )}
         </form>
 
         {/* forgot password — centered */}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AsciiBackground } from "./components/AsciiBackground";
 import { AsciiChart } from "./components/AsciiChart";
 import { Navbar } from "./components/Navbar";
@@ -13,6 +13,8 @@ import { ForgotPasswordPage } from "./components/ForgotPasswordPage";
 import { Footer } from "./components/Footer";
 import { Toaster } from "./components/ui/sonner";
 import { RequestAccessPage } from "./components/RequestAccessPage";
+import { DashboardPage } from "./components/DashboardPage";
+import { getCurrentProfile, signOut, type Profile } from "./lib/auth";
 
 export default function App() {
   const [activePage, setActivePage] = useState("Home");
@@ -22,6 +24,17 @@ export default function App() {
     setAccessCtx(ctx ?? null);
     setActivePage("RequestAccess");
   };
+
+  const [profile, setProfile] = useState<Profile | null>(null);
+
+  useEffect(() => {
+    getCurrentProfile().then((p) => {
+      if (p) {
+        setProfile(p);
+        setActivePage("Dashboard");
+      }
+    });
+  }, []);
 
   return (
     <div
@@ -58,6 +71,23 @@ export default function App() {
         <LoginPage
           onHome={() => setActivePage("Home")}
           onForgotPassword={() => setActivePage("ForgotPassword")}
+          onLoginSuccess={(p) => {
+            setProfile(p);
+            setActivePage("Dashboard");
+          }}
+        />
+      )}
+
+      {activePage !== "Dashboard" && <Navbar activePage={activePage} onNavigate={setActivePage} />}
+
+      {activePage === "Dashboard" && (
+        <DashboardPage
+          profile={profile}
+          onLogout={async () => {
+            await signOut();
+            setProfile(null);
+            setActivePage("Home");
+          }}
         />
       )}
 
@@ -67,7 +97,7 @@ export default function App() {
         />
       )}
 
-      {activePage !== "Services" && activePage !== "Pricing" && activePage !== "About" && activePage !== "Blog" && activePage !== "Login" && activePage !== "ForgotPassword" && activePage !== "RequestAccess" && <>
+      {activePage !== "Services" && activePage !== "Pricing" && activePage !== "About" && activePage !== "Blog" && activePage !== "Login" && activePage !== "ForgotPassword" && activePage !== "RequestAccess" && activePage !== "Dashboard" && <>
 
       {/* ── HERO SECTION ── */}
       <section
