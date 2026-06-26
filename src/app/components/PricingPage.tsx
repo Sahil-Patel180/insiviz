@@ -316,7 +316,7 @@ function PriceTag({ plan, annual }: { plan: Plan; annual: boolean }) {
   );
 }
 
-function PlanCard({ plan, annual, index }: { plan: Plan; annual: boolean; index: number }) {
+function PlanCard({ plan, annual, index, onSelect }: { plan: Plan; annual: boolean; index: number; onSelect: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const isInView = useInView(ref, { once: true, margin: "-40px" });
   const [hovered, setHovered] = useState(false);
@@ -410,6 +410,7 @@ function PlanCard({ plan, annual, index }: { plan: Plan; annual: boolean; index:
       <PriceTag plan={plan} annual={annual} />
 
       <button
+        onClick={onSelect}
         style={{
           width: "100%",
           marginTop: "26px",
@@ -471,12 +472,12 @@ function PlanCard({ plan, annual, index }: { plan: Plan; annual: boolean; index:
   );
 }
 
-function PricingCards({ annual }: { annual: boolean }) {
+function PricingCards({ annual, onSelect }: { annual: boolean; onSelect: (planId:string) => void }) {
   return (
     <section className="w-full px-6 py-10" style={{ background: "#0d0d0f" }}>
       <div className="max-w-5xl mx-auto grid md:grid-cols-2 gap-8">
         {PLANS.map((plan, i) => (
-          <PlanCard key={plan.id} plan={plan} annual={annual} index={i} />
+          <PlanCard key={plan.id} plan={plan} annual={annual} index={i} onSelect={() => onSelect(plan.id)} />
         ))}
       </div>
     </section>
@@ -751,7 +752,7 @@ function FAQSection() {
 }
 
 // ─── MAIN EXPORT ──────────────────────────────────────────────────────────────
-export function PricingPage({ onHome }: { onHome: () => void }) {
+export function PricingPage({ onHome, onRequestAccess }: { onHome: () => void; onRequestAccess: (ctx?: { planId: "perviz" | "orgviz"; billing: "monthly" | "annual" }) => void; }) {
   const [annual, setAnnual] = useState(true);
 
   useEffect(() => {
@@ -764,7 +765,7 @@ export function PricingPage({ onHome }: { onHome: () => void }) {
       <div className="px-6 pt-10">
         <BillingToggle annual={annual} onChange={setAnnual} />
       </div>
-      <PricingCards annual={annual} />
+      <PricingCards annual={annual} onSelect={(planId) => onRequestAccess({ planId: planId as "perviz" | "orgviz", billing: annual ? "annual" : "monthly" })} />
       <FeatureCompareTable />
       <FAQSection />
       <CTABand
@@ -777,6 +778,7 @@ export function PricingPage({ onHome }: { onHome: () => void }) {
           </>
         }
         buttonText="Get Started Free"
+        onClick={() => onRequestAccess()}
       />
       <Footer />
     </div>

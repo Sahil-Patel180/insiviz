@@ -12,9 +12,16 @@ import { LoginPage } from "./components/LoginPage";
 import { ForgotPasswordPage } from "./components/ForgotPasswordPage";
 import { Footer } from "./components/Footer";
 import { Toaster } from "./components/ui/sonner";
+import { RequestAccessPage } from "./components/RequestAccessPage";
 
 export default function App() {
   const [activePage, setActivePage] = useState("Home");
+  const [accessCtx, setAccessCtx] = useState<{ planId: "perviz" | "orgviz"; billing: "monthly" | "annual" } | null>(null);
+
+  const goToRequestAccess = (ctx?: { planId: "perviz" | "orgviz"; billing: "monthly" | "annual" }) => {
+    setAccessCtx(ctx ?? null);
+    setActivePage("RequestAccess");
+  };
 
   return (
     <div
@@ -29,7 +36,14 @@ export default function App() {
       )}
 
       {activePage === "Pricing" && (
-        <PricingPage onHome={() => setActivePage("Home")} />
+        <PricingPage onHome={() => setActivePage("Home")} onRequestAccess={goToRequestAccess} />
+    )}
+
+    {activePage === "RequestAccess" && (
+      <RequestAccessPage
+        initialPlan={accessCtx}
+        onHome={() => setActivePage("Home")}
+        onBackToPricing={() => setActivePage("Pricing")} />
     )}
 
       {activePage === "About" && (
@@ -53,7 +67,7 @@ export default function App() {
         />
       )}
 
-      {activePage !== "Services" && activePage !== "Pricing" && activePage !== "About" && activePage !== "Blog" && activePage !== "Login" && activePage !== "ForgotPassword" && <>
+      {activePage !== "Services" && activePage !== "Pricing" && activePage !== "About" && activePage !== "Blog" && activePage !== "Login" && activePage !== "ForgotPassword" && activePage !== "RequestAccess" && <>
 
       {/* ── HERO SECTION ── */}
       <section

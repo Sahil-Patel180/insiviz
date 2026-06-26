@@ -19,9 +19,10 @@ interface CTABandProps {
   headline: React.ReactNode;
   buttonText: string;
   label?: string;
+  onClick?: () => void;
 }
 
-export function CTABand({ headline, buttonText, label = "// GET STARTED" }: CTABandProps) {
+export function CTABand({ headline, buttonText, label = "// GET STARTED", onClick }: CTABandProps) {
   const ref = useRef<HTMLDivElement>(null);
   const isInView = useInView(ref, { once: true, margin: "-60px" });
 
@@ -91,6 +92,7 @@ export function CTABand({ headline, buttonText, label = "// GET STARTED" }: CTAB
         </h2>
 
         <motion.button
+          onClick={onClick}
           whileHover={{ scale: 1.04 }}
           whileTap={{ scale: 0.97 }}
           initial={{ opacity: 0, y: 16 }}

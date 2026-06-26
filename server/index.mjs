@@ -14,6 +14,7 @@ import {
   setResetTokenRecord,
   updatePasswordForEmail,
 } from "./auth-store.js";
+import { createAccessRequest } from "./access-request-store.js";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
@@ -195,3 +196,26 @@ const server = createServer(async (req, res) => {
 server.listen(port, () => {
   console.log(`Auth API listening on http://localhost:${port}`);
 });
+
+async function handleAccessRequest(req, res){
+  const body = await readRequestBody(req);
+  const { plan, accountType, fullName, email } = body;
+
+  if (!fullName?.trim() || !email?.trim() || (accountType === "organization" && !body.orgName?.trim())) {
+    sendJson(res, 400, { success: false, message: "Missing requied fields." });
+    return;
+  }
+
+  try {
+    await createAccessRequest(body);
+    sendJson(res, 200, { success: true });
+  } catch (error) {
+    console.error("Access request insert failed:", error);
+    sendJson(res, 500, { success: false, message: "Could not submit request." });
+  }
+}
+
+if (url.pathname === "/api/access-requests") {
+  await handleAccessRequest(req, res);
+  return;
+}
