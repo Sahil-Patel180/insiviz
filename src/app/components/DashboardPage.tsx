@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { TrendingUp, PieChart, BarChart3, Activity, Layers, Table2 } from "lucide-react";
 import type { Profile } from "../lib/auth";
+import { AppNav } from "./AppNav";
 
 const MINT  = "#7affc8";
 const MR    = "122,255,200";
@@ -10,12 +11,12 @@ const exo   = "'Exo 2', sans-serif";
 const orb   = "'Orbitron', sans-serif";
 const mono  = "'JetBrains Mono', monospace";
 
-const NAV_ITEMS = [
-  { label: "Dashboard", enabled: true },
-  { label: "Datasets",  enabled: false },
-  { label: "Insights",  enabled: false },
-  { label: "Reports",   enabled: false },
-];
+// const NAV_ITEMS = [
+//   { label: "Dashboard", enabled: true },
+//   { label: "Datasets",  enabled: false },
+//   { label: "Insights",  enabled: false },
+//   { label: "Reports",   enabled: false },
+// ];
 
 const TILES = [
   { bg: "#378ADD", fg: "#042C53", sub: "#0C447C", icon: TrendingUp, title: "Revenue trend",     chart: "Line chart" },
@@ -44,9 +45,11 @@ function getInitials(profile: Profile | null) {
 export function DashboardPage({
   profile,
   onLogout,
+  onNavigate
 }: {
   profile: Profile | null;
   onLogout: () => void;
+  onNavigate: (page: string) => void;
 }) {
   const [hovered, setHovered] = useState<string | null>(null);
   const displayName = profile?.full_name?.trim() || profile?.email || "there";
@@ -54,7 +57,7 @@ export function DashboardPage({
   return (
     <div style={{ minHeight: "100vh", background: "#0d0d0f" }}>
       {/* ── app nav ── */}
-      <nav
+      {/* <nav
         className="flex items-center justify-between px-6 py-3"
         style={{
           background: "rgba(13,13,15,0.85)",
@@ -136,7 +139,8 @@ export function DashboardPage({
             log_out
           </button>
         </div>
-      </nav>
+      </nav> */}
+      <AppNav active="Dashboard" profile={profile} onLogout={onLogout} onNavigate={onNavigate} />
 
       {/* ── main ── */}
       <main style={{ maxWidth: "1100px", margin: "0 auto", padding: "32px 24px 64px" }}>

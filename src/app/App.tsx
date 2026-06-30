@@ -14,27 +14,27 @@ import { Footer } from "./components/Footer";
 import { Toaster } from "./components/ui/sonner";
 import { RequestAccessPage } from "./components/RequestAccessPage";
 import { DashboardPage } from "./components/DashboardPage";
+import { DailyDeckPage } from "./components/DailyDeckPage";
 import { getCurrentProfile, signOut, type Profile } from "./lib/auth";
 
 export default function App() {
   const [activePage, setActivePage] = useState("Home");
   const [accessCtx, setAccessCtx] = useState<{ planId: "perviz" | "orgviz"; billing: "monthly" | "annual" } | null>(null);
-
-  const goToRequestAccess = (ctx?: { planId: "perviz" | "orgviz"; billing: "monthly" | "annual" }) => {
-    setAccessCtx(ctx ?? null);
-    setActivePage("RequestAccess");
-  };
-
   const [profile, setProfile] = useState<Profile | null>(null);
 
   useEffect(() => {
     getCurrentProfile().then((p) => {
       if (p) {
         setProfile(p);
-        setActivePage("Dashboard");
+        setActivePage("DailyDeck");
       }
     });
   }, []);
+
+  const goToRequestAccess = (ctx?: { planId: "perviz" | "orgviz"; billing: "monthly" | "annual" }) => {
+    setAccessCtx(ctx ?? null);
+    setActivePage("RequestAccess");
+  };
 
   return (
     <div
@@ -42,7 +42,9 @@ export default function App() {
       style={{ background: "#0d0d0f", overflowX: "hidden" }}
     >
       <Toaster richColors closeButton position="top-center" />
-      <Navbar activePage={activePage} onNavigate={setActivePage} />
+      {activePage !== "Dashboard" && activePage !== "DailyDeck" && (
+        <Navbar activePage={activePage} onNavigate={setActivePage} />
+      )}
 
       {activePage === "Services" && (
         <ServicesPage onHome={() => setActivePage("Home")} />
@@ -50,14 +52,14 @@ export default function App() {
 
       {activePage === "Pricing" && (
         <PricingPage onHome={() => setActivePage("Home")} onRequestAccess={goToRequestAccess} />
-    )}
+      )}
 
-    {activePage === "RequestAccess" && (
-      <RequestAccessPage
-        initialPlan={accessCtx}
-        onHome={() => setActivePage("Home")}
-        onBackToPricing={() => setActivePage("Pricing")} />
-    )}
+      {activePage === "RequestAccess" && (
+        <RequestAccessPage
+          initialPlan={accessCtx}
+          onHome={() => setActivePage("Home")}
+          onBackToPricing={() => setActivePage("Pricing")} />
+      )}
 
       {activePage === "About" && (
         <AboutPage onHome={() => setActivePage("Home")} />
@@ -73,20 +75,7 @@ export default function App() {
           onForgotPassword={() => setActivePage("ForgotPassword")}
           onLoginSuccess={(p) => {
             setProfile(p);
-            setActivePage("Dashboard");
-          }}
-        />
-      )}
-
-      {activePage !== "Dashboard" && <Navbar activePage={activePage} onNavigate={setActivePage} />}
-
-      {activePage === "Dashboard" && (
-        <DashboardPage
-          profile={profile}
-          onLogout={async () => {
-            await signOut();
-            setProfile(null);
-            setActivePage("Home");
+            setActivePage("DailyDeck");
           }}
         />
       )}
@@ -97,17 +86,39 @@ export default function App() {
         />
       )}
 
-      {activePage !== "Services" && activePage !== "Pricing" && activePage !== "About" && activePage !== "Blog" && activePage !== "Login" && activePage !== "ForgotPassword" && activePage !== "RequestAccess" && activePage !== "Dashboard" && <>
+      {activePage === "Dashboard" && (
+        <DashboardPage
+          profile={profile}
+          onNavigate={setActivePage}
+          onLogout={async () => {
+            await signOut();
+            setProfile(null);
+            setActivePage("Home");
+          }}
+        />
+      )}
+
+      {activePage === "DailyDeck" && (
+        <DailyDeckPage
+          profile={profile}
+          onNavigate={setActivePage}
+          onLogout={async () => {
+            await signOut();
+            setProfile(null);
+            setActivePage("Home");
+          }}
+        />
+      )}
+
+      {activePage !== "Services" && activePage !== "Pricing" && activePage !== "About" && activePage !== "Blog" && activePage !== "Login" && activePage !== "ForgotPassword" && activePage !== "RequestAccess" && activePage !== "Dashboard" && activePage !== "DailyDeck" && <>
 
       {/* ── HERO SECTION ── */}
       <section
         className="relative w-full flex flex-col items-center justify-center overflow-hidden"
         style={{ minHeight: "100vh", paddingTop: "42px" }}
       >
-        {/* Live ASCII background */}
         <AsciiBackground />
 
-        {/* Radial vignette over ASCII */}
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
@@ -116,16 +127,12 @@ export default function App() {
           }}
         />
 
-        {/* Content */}
-        {/* Hero content area */}
         <div
           className="relative z-10 w-full flex items-center justify-center px-4"
           style={{ minHeight: "calc(100vh - 72px)" }}
         >
-          {/* AsciiChart — stretches to fill this div absolutely */}
           <AsciiChart bare />
 
-          {/* Frosted glass layer over the chart */}
           <div
             className="absolute inset-0 pointer-events-none"
             style={{
@@ -135,7 +142,6 @@ export default function App() {
             }}
           />
 
-          {/* Content — no card, no border, floats directly over frosted chart */}
           <div
             className="relative flex flex-col items-center gap-8 text-center"
             style={{
@@ -144,7 +150,6 @@ export default function App() {
               padding: "clamp(2.5rem, 5vw, 4.5rem) clamp(2rem, 6vw, 5rem)",
             }}
           >
-            {/* eyebrow — Share Tech Mono (SD Dystopian-inspired) */}
             <div
               style={{
                 fontFamily: "'Share Tech Mono', monospace",
@@ -160,7 +165,6 @@ export default function App() {
               // AI-POWERED CHART INTELLIGENCE
             </div>
 
-            {/* headline — Russo One (Rapid Response-inspired from FontSpace) */}
             <h1
               style={{
                 fontFamily: "'Russo One', sans-serif",
@@ -185,7 +189,6 @@ export default function App() {
               </span>
             </h1>
 
-            {/* subtext — Exo 2 light italic */}
             <p
               style={{
                 fontFamily: "'Exo 2', sans-serif",
@@ -201,7 +204,6 @@ export default function App() {
               combination — no guesswork, no wrong charts, no wasted dashboard cycles.
             </p>
 
-            {/* CTA row — Syncopate primary, Share Tech Mono secondary */}
             <div className="flex flex-wrap gap-4 justify-center">
               <button
                 style={{
@@ -261,7 +263,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* scroll hint */}
         <div
           className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2"
           style={{
