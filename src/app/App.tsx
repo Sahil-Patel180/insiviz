@@ -13,8 +13,9 @@ import { ForgotPasswordPage } from "./components/ForgotPasswordPage";
 import { Footer } from "./components/Footer";
 import { Toaster } from "./components/ui/sonner";
 import { RequestAccessPage } from "./components/RequestAccessPage";
-import { DashboardPage } from "./components/DashboardPage";
 import { DailyDeckPage } from "./components/DailyDeckPage";
+import { DataDeckPage } from "./components/DataDeckPage";
+import { DashboardPage } from "./components/DashboardPage";
 import { getCurrentProfile, signOut, type Profile } from "./lib/auth";
 
 export default function App() {
@@ -86,18 +87,6 @@ export default function App() {
         />
       )}
 
-      {activePage === "Dashboard" && (
-        <DashboardPage
-          profile={profile}
-          onNavigate={setActivePage}
-          onLogout={async () => {
-            await signOut();
-            setProfile(null);
-            setActivePage("Home");
-          }}
-        />
-      )}
-
       {activePage === "DailyDeck" && (
         <DailyDeckPage
           profile={profile}
@@ -110,7 +99,31 @@ export default function App() {
         />
       )}
 
-      {activePage !== "Services" && activePage !== "Pricing" && activePage !== "About" && activePage !== "Blog" && activePage !== "Login" && activePage !== "ForgotPassword" && activePage !== "RequestAccess" && activePage !== "Dashboard" && activePage !== "DailyDeck" && <>
+      {activePage === "DataDeck" && (
+        <DataDeckPage
+          profile={profile}
+          onNavigate={setActivePage}
+          onLogout={async () => {
+            await signOut();
+            setProfile(null);
+            setActivePage("Home");
+          }}
+        />
+      )}
+
+      {activePage === "Dashboard" && (
+        <DashboardPage
+          profile={profile}
+          onNavigate={setActivePage}
+          onLogout={async () => {
+            await signOut();
+            setProfile(null);
+            setActivePage("Home");
+          }}
+        />
+      )}
+
+      {activePage !== "Services" && activePage !== "Pricing" && activePage !== "About" && activePage !== "Blog" && activePage !== "Login" && activePage !== "ForgotPassword" && activePage !== "RequestAccess" && activePage !== "DailyDeck" && activePage !== "DataDeck" && activePage !== "Dashboard" && <>
 
       {/* ── HERO SECTION ── */}
       <section
