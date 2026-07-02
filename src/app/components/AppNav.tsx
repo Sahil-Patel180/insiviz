@@ -12,7 +12,7 @@ export const APP_NAV_ITEMS = [
   { label: "DataDeck",    enabled: true },
   { label: "Dashboard",   enabled: true },
   { label: "Vizstore",    enabled: false },
-  { label: "Connections", enabled: false },
+  { label: "Connections", enabled: true },
   { label: "DocBuild",    enabled: false },
 ];
 

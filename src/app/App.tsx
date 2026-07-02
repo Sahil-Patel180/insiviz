@@ -16,6 +16,7 @@ import { RequestAccessPage } from "./components/RequestAccessPage";
 import { DailyDeckPage } from "./components/DailyDeckPage";
 import { DataDeckPage } from "./components/DataDeckPage";
 import { DashboardPage } from "./components/DashboardPage";
+import { ConnectionsPage } from "./components/ConnectionsPage";
 import { getCurrentProfile, signOut, type Profile } from "./lib/auth";
 
 export default function App() {
@@ -123,7 +124,19 @@ export default function App() {
         />
       )}
 
-      {activePage !== "Services" && activePage !== "Pricing" && activePage !== "About" && activePage !== "Blog" && activePage !== "Login" && activePage !== "ForgotPassword" && activePage !== "RequestAccess" && activePage !== "DailyDeck" && activePage !== "DataDeck" && activePage !== "Dashboard" && <>
+      {activePage === "Connections" && (
+        <ConnectionsPage
+          profile={profile}
+          onNavigate={setActivePage}
+          onLogout={async () => {
+            await signOut();
+            setProfile(null);
+            setActivePage("Home");
+          }}
+        />
+      )}
+
+      {activePage !== "Services" && activePage !== "Pricing" && activePage !== "About" && activePage !== "Blog" && activePage !== "Login" && activePage !== "ForgotPassword" && activePage !== "RequestAccess" && activePage !== "DailyDeck" && activePage !== "DataDeck" && activePage !== "Dashboard" && activePage !== "Connections" && <>
 
       {/* ── HERO SECTION ── */}
       <section

@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import {
   Plus, Search, ChevronRight, ChevronDown,
   Folder, FolderOpen, Upload, FileSpreadsheet,
-  FileJson, FileText, X, Database,
+  FileJson, FileText, X, Database, Server
 } from "lucide-react";
 import type { Profile } from "../lib/auth";
 import { AppNav } from "./AppNav";
@@ -219,6 +219,7 @@ export function DataDeckPage({
   const [newProjectName, setNewProjectName]   = useState("");
   const [creatingFolder, setCreatingFolder]   = useState(false);
   const [newFolderName, setNewFolderName]     = useState("");
+  const [fetchModalOpen, setFetchModalOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selected = resolveSelected(projects, selectedId);
@@ -519,6 +520,11 @@ export function DataDeckPage({
                   <span style={{ fontFamily: mono, fontSize: "0.78rem", color: "#e8e8ea", fontWeight: 500 }}>{breadcrumb}</span>
                 </div>
 
+                <input ref={fileInputRef} type="file" accept=".csv,.json,.xlsx,.tsv" style={{ display: "none" }} onChange={handleFileUpload} />
+                <button onClick={() => fileInputRef.current?.click()} style={mintBtn}>
+                  <Upload size={12} /> UPLOAD_DATASET
+                </button>
+
                 <div style={{ display: "flex", gap: "8px" }}>
                   <button onClick={() => setCreatingFolder(true)} style={ghostBtn}>
                     <Folder size={12} /> + SUBFOLDER
@@ -526,6 +532,16 @@ export function DataDeckPage({
                   <input ref={fileInputRef} type="file" accept=".csv,.json,.xlsx,.tsv" style={{ display: "none" }} onChange={handleFileUpload} />
                   <button onClick={() => fileInputRef.current?.click()} style={mintBtn}>
                     <Upload size={12} /> UPLOAD_DATASET
+                  </button>
+                  <button onClick={() => setFetchModalOpen(true)} style={ghostBtn}>
+                    <Server size={12} /> FETCH_FROM_CONNECTION
+                  </button>
+                  <input ref={fileInputRef} type="file" accept=".csv,.json,.xlsx,.tsv" style={{ display: "none" }} onChange={handleFileUpload} />
+                  <button onClick={() => fileInputRef.current?.click()} style={mintBtn}>
+                    <Upload size={12} /> UPLOAD_DATASET
+                  </button>
+                  <button onClick={() => setFetchModalOpen(true)} style={ghostBtn}>
+                    <Server size={12} /> FETCH_FROM_CONNECTION
                   </button>
                 </div>
               </div>
@@ -662,6 +678,23 @@ export function DataDeckPage({
           )}
         </main>
       </div>
+
+      {fetchModalOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
+          <div style={{ background: "#141418", borderRadius: "16px", border: `1px solid rgba(${MR},0.12)`, width: "380px", padding: "22px" }}>
+            <p style={{ fontFamily: syn, fontWeight: 700, fontSize: "0.6rem", letterSpacing: "0.14em", color: MINT, marginBottom: "14px" }}>
+              FETCH FROM CONNECTION
+            </p>
+            <p style={{ fontFamily: share, fontSize: "0.6rem", color: "#6e6e76", lineHeight: 1.8, marginBottom: "16px" }}>
+              No active connections yet, or table/collection picker isn't wired up. Set one up in Connections first.
+            </p>
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button onClick={() => onNavigate("Connections")} style={mintBtn}>GO_TO_CONNECTIONS</button>
+              <button onClick={() => setFetchModalOpen(false)} style={ghostBtn}>CLOSE</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

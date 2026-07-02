@@ -15,6 +15,7 @@ import {
   updatePasswordForEmail,
 } from "./auth-store.js";
 import { createAccessRequest } from "./access-request-store.js";
+import { registerConnectionRoutes } from "./connections-routes.mjs";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
@@ -219,3 +220,5 @@ const server = createServer(async (req, res) => {
 server.listen(port, () => {
   console.log(`Auth API listening on http://localhost:${port}`);
 });
+
+registerConnectionRoutes(app);
