@@ -15,7 +15,12 @@ import {
   updatePasswordForEmail,
 } from "./auth-store.js";
 import { createAccessRequest } from "./access-request-store.js";
-import { registerConnectionRoutes } from "./connections-routes.mjs";
+import {
+  handleListConnections,
+  handleCreateConnection,
+  handleDeleteConnection,
+  handleTestConnection,
+} from "./connections-routes.mjs";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
@@ -182,7 +187,7 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  if (req.method !== "POST") {
+  if (!["POST", "GET", "DELETE"].includes(req.method)) {
     sendJson(res, 405, { success: false });
     return;
   }
@@ -210,6 +215,28 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/api/connections" && req.method === "GET") {
+      await handleListConnections(req, res, url);
+      return;
+    }
+
+    if (url.pathname === "/api/connections" && req.method === "POST") {
+      await handleCreateConnection(req, res);
+      return;
+    }
+
+    const testMatch = url.pathname.match(/^\/api\/connections\/([^/]+)\/test$/);
+    if (testMatch && req.method === "POST") {
+      await handleTestConnection(req, res, testMatch[1]);
+      return;
+    }
+
+    const deleteMatch = url.pathname.match(/^\/api\/connections\/([^/]+)$/);
+    if (deleteMatch && req.method === "DELETE") {
+      await handleDeleteConnection(req, res, deleteMatch[1]);
+      return;
+    }
+
     sendJson(res, 404, { success: false });
   } catch (error) {
     console.error("Auth API error:", error);
@@ -220,5 +247,3 @@ const server = createServer(async (req, res) => {
 server.listen(port, () => {
   console.log(`Auth API listening on http://localhost:${port}`);
 });
-
-registerConnectionRoutes(app);

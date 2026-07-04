@@ -61,34 +61,61 @@ export function ConnectionsPage({
   const [sslEnabled, setSslEnabled]     = useState(false);
   const [ollamaUrl, setOllamaUrl]       = useState("http://localhost:11434");
   const [ollamaModel, setOllamaModel]   = useState("llama3");
+  const [authType, setAuthType] = useState<"sql" | "windows">("sql");
+  const [domain, setDomain]     = useState("");
 
   const resetForm = () => {
     setName(""); setHost(""); setDatabase(""); setUsername(""); setPassword("");
     setSslEnabled(false); setShowPassword(false);
     setSubtype("postgresql"); setPort("5432");
     setOllamaUrl("http://localhost:11434"); setOllamaModel("llama3");
+    setAuthType("sql"); setDomain("");
   };
 
   const closeModal = () => { setModalOpen(null); resetForm(); };
 
-  const saveConnection = () => {
-    if (!name.trim()) return;
-    const conn: Connection = modalOpen === "llm"
-      ? { id: crypto.randomUUID(), name, type: "llm", subtype: "ollama", ollamaUrl, ollamaModel, status: "untested" }
-      : { id: crypto.randomUUID(), name, type: "database", subtype, host, port, database, username, sslEnabled, status: "untested" };
-    // NOTE: this stores locally only. Real save = POST /api/connections (server encrypts password
-    // server-side before it ever reaches Supabase — see server/connections-routes.mjs).
-    setConnections((prev) => [...prev, conn]);
-    closeModal();
+  const saveConnection = async () => {
+    if (!name.trim() || !profile?.id) return;
+
+    const body = modalOpen === "llm"
+      ? { user_id: profile.id, name, type: "llm", subtype: "ollama", host: ollamaUrl, database_name: ollamaModel }
+      : { user_id: profile.id, name, type: "database", subtype, host, port, database_name: database, username, password, ssl_enabled: sslEnabled, auth_type: authType, domain };
+
+    try {
+      const res = await fetch("/api/connections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      const saved = await res.json();
+
+      setConnections((prev) => [...prev, {
+        id: saved.id, name: saved.name, type: saved.type, subtype: saved.subtype,
+        host: saved.host, port: saved.port, database: saved.database_name, username: saved.username,
+        sslEnabled: saved.ssl_enabled, status: saved.status,
+        ollamaUrl: saved.type === "llm" ? saved.host : undefined,
+        ollamaModel: saved.type === "llm" ? saved.database_name : undefined,
+      }]);
+      closeModal();
+    } catch {
+      console.error("Could not save connection.");
+    }
   };
 
   const removeConnection = (id: string) => {
     setConnections((prev) => prev.filter((c) => c.id !== id));
   };
 
-  const testConnection = (id: string) => {
-    // TODO: call POST /api/connections/:id/test once server drivers are wired.
+  const testConnection = async (id: string) => {
     setConnections((prev) => prev.map((c) => c.id === id ? { ...c, status: "untested" } : c));
+    try {
+      const res = await fetch(`/api/connections/${id}/test`, { method: "POST" });
+      const result = await res.json();
+      setConnections((prev) => prev.map((c) => c.id === id ? { ...c, status: result.status ?? "failed" } : c));
+    } catch {
+      setConnections((prev) => prev.map((c) => c.id === id ? { ...c, status: "failed" } : c));
+    }
   };
 
   const inputStyle = {
@@ -181,6 +208,21 @@ export function ConnectionsPage({
                     {DB_SUBTYPES.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
                   </select>
                 </div>
+
+                <div style={{ marginBottom: "14px" }}>
+                  <label style={labelStyle}>Authentication Type</label>
+                  <select value={authType} onChange={(e) => setAuthType(e.target.value as "sql" | "windows")} style={inputStyle}>
+                    <option value="sql">SQL Server Authentication</option>
+                    <option value="windows">Windows Authentication (NTLM)</option>
+                  </select>
+                </div>
+
+                {authType === "windows" && (
+                  <div style={{ marginBottom: "14px" }}>
+                    <label style={labelStyle}>Domain</label>
+                    <input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="CORP or corp.local" style={inputStyle} />
+                  </div>
+                )}
 
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "10px", marginBottom: "14px" }}>
                   <div>
