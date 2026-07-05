@@ -15,7 +15,7 @@ const syn   = "'Syncopate', sans-serif";
 
 // ── types ─────────────────────────────────────────────────────────────────
 
-type DatasetType = "csv" | "json" | "xlsx" | "tsv";
+type DatasetType = "csv" | "json" | "xlsx" | "tsv" | "table";
 type FilterType  = DatasetType | "all";
 
 type Dataset = {
@@ -49,6 +49,7 @@ const TYPE_COLORS: Record<DatasetType, string> = {
   xlsx: "#7affc8",
   json: "#EF9F27",
   tsv:  "#378ADD",
+  table: "#AFA9EC",
 };
 
 const FILTER_OPTIONS: FilterType[] = ["all", "csv", "json", "xlsx", "tsv"];
@@ -59,6 +60,7 @@ function TypeIcon({ type, size = 15 }: { type: DatasetType; size?: number }) {
   const color = TYPE_COLORS[type];
   if (type === "json") return <FileJson size={size} color={color} />;
   if (type === "csv" || type === "xlsx") return <FileSpreadsheet size={size} color={color} />;
+  if (type === "table") return <Database size={size} color={color} />;
   return <FileText size={size} color={color} />;
 }
 
@@ -219,7 +221,13 @@ export function DataDeckPage({
   const [newProjectName, setNewProjectName]   = useState("");
   const [creatingFolder, setCreatingFolder]   = useState(false);
   const [newFolderName, setNewFolderName]     = useState("");
-  const [fetchModalOpen, setFetchModalOpen] = useState(false);
+  const [fetchModalOpen, setFetchModalOpen]   = useState(false);
+  const [connections, setConnections]         = useState<{ id: string; name: string; type: string; subtype: string }[]>([]);
+  const [selectedConnId, setSelectedConnId]   = useState<string | null>(null);
+  const [tables, setTables]                   = useState<string[]>([]);
+  const [selectedTable, setSelectedTable]     = useState<string | null>(null);
+  const [fetchStep, setFetchStep]             = useState<"pick-connection" | "pick-table" | "loading" | "error">("pick-connection");
+  const [fetchError, setFetchError]           = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selected = resolveSelected(projects, selectedId);
@@ -533,14 +541,44 @@ export function DataDeckPage({
                   <button onClick={() => fileInputRef.current?.click()} style={mintBtn}>
                     <Upload size={12} /> UPLOAD_DATASET
                   </button>
-                  <button onClick={() => setFetchModalOpen(true)} style={ghostBtn}>
+                  <button
+                    onClick={async () => {
+                      setFetchModalOpen(true);
+                      setFetchStep("pick-connection");
+                      setFetchError(null);
+                      if (!profile?.id) return;
+                      try {
+                        const res = await fetch(`/api/connections?user_id=${profile.id}`);
+                        const data = await res.json();
+                        setConnections(data.filter((c: any) => c.type === "database"));
+                      } catch {
+                        setFetchError("Could not load connections.");
+                      }
+                    }}
+                    style={ghostBtn}
+                  >
                     <Server size={12} /> FETCH_FROM_CONNECTION
                   </button>
                   <input ref={fileInputRef} type="file" accept=".csv,.json,.xlsx,.tsv" style={{ display: "none" }} onChange={handleFileUpload} />
                   <button onClick={() => fileInputRef.current?.click()} style={mintBtn}>
                     <Upload size={12} /> UPLOAD_DATASET
                   </button>
-                  <button onClick={() => setFetchModalOpen(true)} style={ghostBtn}>
+                  <button
+                    onClick={async () => {
+                      setFetchModalOpen(true);
+                      setFetchStep("pick-connection");
+                      setFetchError(null);
+                      if (!profile?.id) return;
+                      try {
+                        const res = await fetch(`/api/connections?user_id=${profile.id}`);
+                        const data = await res.json();
+                        setConnections(data.filter((c: any) => c.type === "database"));
+                      } catch {
+                        setFetchError("Could not load connections.");
+                      }
+                    }}
+                    style={ghostBtn}
+                  >
                     <Server size={12} /> FETCH_FROM_CONNECTION
                   </button>
                 </div>
@@ -681,17 +719,130 @@ export function DataDeckPage({
 
       {fetchModalOpen && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
-          <div style={{ background: "#141418", borderRadius: "16px", border: `1px solid rgba(${MR},0.12)`, width: "380px", padding: "22px" }}>
-            <p style={{ fontFamily: syn, fontWeight: 700, fontSize: "0.6rem", letterSpacing: "0.14em", color: MINT, marginBottom: "14px" }}>
-              FETCH FROM CONNECTION
-            </p>
-            <p style={{ fontFamily: share, fontSize: "0.6rem", color: "#6e6e76", lineHeight: 1.8, marginBottom: "16px" }}>
-              No active connections yet, or table/collection picker isn't wired up. Set one up in Connections first.
-            </p>
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button onClick={() => onNavigate("Connections")} style={mintBtn}>GO_TO_CONNECTIONS</button>
-              <button onClick={() => setFetchModalOpen(false)} style={ghostBtn}>CLOSE</button>
+          <div style={{ background: "#141418", borderRadius: "16px", border: `1px solid rgba(${MR},0.12)`, width: "420px", maxHeight: "80vh", overflowY: "auto", padding: "22px" }}>
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
+              <span style={{ fontFamily: syn, fontWeight: 700, fontSize: "0.6rem", letterSpacing: "0.14em", color: MINT }}>
+                FETCH FROM CONNECTION
+              </span>
+              <button onClick={() => setFetchModalOpen(false)} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#45454d" }}>
+                <X size={16} />
+              </button>
             </div>
+
+            {fetchError && (
+              <p style={{ fontFamily: share, fontSize: "0.6rem", color: "#ED93B1", marginBottom: "14px" }}>{fetchError}</p>
+            )}
+
+            {/* step 1: pick connection */}
+            {fetchStep === "pick-connection" && (
+              <>
+                {connections.length === 0 ? (
+                  <p style={{ fontFamily: share, fontSize: "0.62rem", color: "#6e6e76", lineHeight: 1.8, marginBottom: "16px" }}>
+                    No database connections yet.
+                  </p>
+                ) : (
+                  <div style={{ display: "grid", gap: "8px", marginBottom: "16px" }}>
+                    {connections.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={async () => {
+                          setSelectedConnId(c.id);
+                          setFetchStep("loading");
+                          setFetchError(null);
+                          try {
+                            const res = await fetch(`/api/connections/${c.id}/tables`);
+                            const data = await res.json();
+                            if (!res.ok) throw new Error(data.error || "Could not list tables.");
+                            setTables(data.tables);
+                            setFetchStep("pick-table");
+                          } catch (e: any) {
+                            setFetchError(e.message);
+                            setFetchStep("error");
+                          }
+                        }}
+                        style={{
+                          display: "flex", alignItems: "center", gap: "10px",
+                          padding: "10px 12px", borderRadius: "8px",
+                          border: `1px solid rgba(${MR},0.1)`, background: "#0d0d0f",
+                          color: "#e8e8ea", cursor: "pointer", textAlign: "left",
+                        }}
+                      >
+                        <Server size={14} color="#9a9aa2" />
+                        <div>
+                          <p style={{ fontFamily: mono, fontSize: "0.7rem", margin: 0 }}>{c.name}</p>
+                          <p style={{ fontFamily: share, fontSize: "0.54rem", color: "#6e6e76", margin: 0 }}>{c.subtype}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <button onClick={() => onNavigate("Connections")} style={ghostBtn}>GO_TO_CONNECTIONS</button>
+              </>
+            )}
+
+            {/* step 2: loading */}
+            {fetchStep === "loading" && (
+              <p style={{ fontFamily: share, fontSize: "0.62rem", color: "#6e6e76", letterSpacing: "0.06em" }}>Loading…</p>
+            )}
+
+            {/* step 3: pick table */}
+            {fetchStep === "pick-table" && (
+              <>
+                <p style={{ fontFamily: share, fontSize: "0.58rem", color: "#6e6e76", marginBottom: "10px", letterSpacing: "0.06em" }}>
+                  {tables.length} table{tables.length !== 1 ? "s" : ""} found
+                </p>
+                <div style={{ display: "grid", gap: "6px", marginBottom: "16px", maxHeight: "260px", overflowY: "auto" }}>
+                  {tables.map((t) => (
+                    <button
+                      key={t}
+                      onClick={async () => {
+                        if (!selectedConnId || !selectedId) return;
+                        setFetchStep("loading");
+                        try {
+                          const res = await fetch(`/api/connections/${selectedConnId}/fetch`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ table: t, limit: 200 }),
+                          });
+                          const data = await res.json();
+                          if (!res.ok) throw new Error(data.error || "Fetch failed.");
+
+                          const dataset: Dataset = {
+                            id: crypto.randomUUID(),
+                            name: t,
+                            type: "table",
+                            rows: data.totalRows,
+                            cols: data.columns.length,
+                            sizeKb: null,
+                            uploadedAt: new Date().toISOString(),
+                          };
+                          setProjects((prev) => addToNode(prev, selectedId, { dataset }));
+                          setFetchModalOpen(false);
+                        } catch (e: any) {
+                          setFetchError(e.message);
+                          setFetchStep("error");
+                        }
+                      }}
+                      style={{
+                        padding: "8px 12px", borderRadius: "6px",
+                        border: `1px solid rgba(${MR},0.08)`, background: "#0d0d0f",
+                        color: "#e8e8ea", cursor: "pointer", textAlign: "left",
+                        fontFamily: mono, fontSize: "0.68rem",
+                      }}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => setFetchStep("pick-connection")} style={ghostBtn}>← BACK</button>
+              </>
+            )}
+
+            {/* step 4: error */}
+            {fetchStep === "error" && (
+              <button onClick={() => setFetchStep("pick-connection")} style={ghostBtn}>← BACK</button>
+            )}
           </div>
         </div>
       )}

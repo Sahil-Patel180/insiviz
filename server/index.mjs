@@ -20,6 +20,8 @@ import {
   handleCreateConnection,
   handleDeleteConnection,
   handleTestConnection,
+  handleListTables,
+  handleFetchTableData,
 } from "./connections-routes.mjs";
 
 dotenv.config({ path: ".env.local" });
@@ -228,6 +230,18 @@ const server = createServer(async (req, res) => {
     const testMatch = url.pathname.match(/^\/api\/connections\/([^/]+)\/test$/);
     if (testMatch && req.method === "POST") {
       await handleTestConnection(req, res, testMatch[1]);
+      return;
+    }
+
+    const tablesMatch = url.pathname.match(/^\/api\/connections\/([^/]+)\/tables$/);
+    if (tablesMatch && req.method === "GET") {
+      await handleListTables(req, res, tablesMatch[1]);
+      return;
+    }
+
+    const fetchMatch = url.pathname.match(/^\/api\/connections\/([^/]+)\/fetch$/);
+    if (fetchMatch && req.method === "POST") {
+      await handleFetchTableData(req, res, fetchMatch[1]);
       return;
     }
 
