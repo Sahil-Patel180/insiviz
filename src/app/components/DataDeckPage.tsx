@@ -222,7 +222,7 @@ export function DataDeckPage({
   const [creatingFolder, setCreatingFolder]   = useState(false);
   const [newFolderName, setNewFolderName]     = useState("");
   const [fetchModalOpen, setFetchModalOpen]   = useState(false);
-  const [connections, setConnections]         = useState<{ id: string; name: string; type: string; subtype: string }[]>([]);
+  const [connections, setConnections]         = useState<{ id: string; name: string; type: string; subtype: string; status: string }[]>([]);
   const [selectedConnId, setSelectedConnId]   = useState<string | null>(null);
   const [tables, setTables]                   = useState<string[]>([]);
   const [selectedTable, setSelectedTable]     = useState<string | null>(null);
@@ -528,11 +528,6 @@ export function DataDeckPage({
                   <span style={{ fontFamily: mono, fontSize: "0.78rem", color: "#e8e8ea", fontWeight: 500 }}>{breadcrumb}</span>
                 </div>
 
-                <input ref={fileInputRef} type="file" accept=".csv,.json,.xlsx,.tsv" style={{ display: "none" }} onChange={handleFileUpload} />
-                <button onClick={() => fileInputRef.current?.click()} style={mintBtn}>
-                  <Upload size={12} /> UPLOAD_DATASET
-                </button>
-
                 <div style={{ display: "flex", gap: "8px" }}>
                   <button onClick={() => setCreatingFolder(true)} style={ghostBtn}>
                     <Folder size={12} /> + SUBFOLDER
@@ -550,29 +545,9 @@ export function DataDeckPage({
                       try {
                         const res = await fetch(`/api/connections?user_id=${profile.id}`);
                         const data = await res.json();
-                        setConnections(data.filter((c: any) => c.type === "database"));
-                      } catch {
-                        setFetchError("Could not load connections.");
-                      }
-                    }}
-                    style={ghostBtn}
-                  >
-                    <Server size={12} /> FETCH_FROM_CONNECTION
-                  </button>
-                  <input ref={fileInputRef} type="file" accept=".csv,.json,.xlsx,.tsv" style={{ display: "none" }} onChange={handleFileUpload} />
-                  <button onClick={() => fileInputRef.current?.click()} style={mintBtn}>
-                    <Upload size={12} /> UPLOAD_DATASET
-                  </button>
-                  <button
-                    onClick={async () => {
-                      setFetchModalOpen(true);
-                      setFetchStep("pick-connection");
-                      setFetchError(null);
-                      if (!profile?.id) return;
-                      try {
-                        const res = await fetch(`/api/connections?user_id=${profile.id}`);
-                        const data = await res.json();
-                        setConnections(data.filter((c: any) => c.type === "database"));
+                        setConnections(
+                          data.filter((c: any) => c.type === "database" && c.status === "connected")
+                        );
                       } catch {
                         setFetchError("Could not load connections.");
                       }

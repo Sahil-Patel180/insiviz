@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Plus, Database, Cloud, Cpu, X, Check, Shield,
-  Server, Lock, Eye, EyeOff, Trash2, Lock as LockIcon,
+  Server, Lock, Eye, EyeOff, Trash2, Lock as LockIcon, Pencil,
 } from "lucide-react";
 import type { Profile } from "../lib/auth";
 import { AppNav } from "./AppNav";
@@ -25,6 +25,8 @@ type Connection = {
   database?: string;
   username?: string;
   sslEnabled?: boolean;
+  authType?: "sql" | "windows";
+  domain?: string;
   ollamaUrl?: string;
   ollamaModel?: string;
   status: "untested" | "connected" | "failed";
@@ -47,7 +49,9 @@ export function ConnectionsPage({
   onNavigate: (page: string) => void;
 }) {
   const [connections, setConnections] = useState<Connection[]>([]);
+  const [connsLoading, setConnsLoading] = useState(true);
   const [modalOpen, setModalOpen]     = useState<ConnType | null>(null);
+  const [editingId, setEditingId]     = useState<string | null>(null);
 
   // form state
   const [name, setName]           = useState("");
@@ -72,39 +76,97 @@ export function ConnectionsPage({
     setAuthType("sql"); setDomain("");
   };
 
-  const closeModal = () => { setModalOpen(null); resetForm(); };
+  const closeModal = () => { setModalOpen(null); setEditingId(null); resetForm(); };
+
+  const mapRow = (r: any): Connection => ({
+    id: r.id, name: r.name, type: r.type, subtype: r.subtype,
+    host: r.host, port: r.port, database: r.database_name, username: r.username,
+    sslEnabled: r.ssl_enabled, authType: r.auth_type, domain: r.domain, status: r.status,
+    ollamaUrl: r.type === "llm" ? r.host : undefined,
+    ollamaModel: r.type === "llm" ? r.database_name : undefined,
+  });
+
+  useEffect(() => {
+    if (!profile?.id) { setConnsLoading(false); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/connections?user_id=${profile.id}`);
+        if (!res.ok) throw new Error("Load failed");
+        const rows = await res.json();
+        if (!cancelled) setConnections(rows.map(mapRow));
+      } catch {
+        console.error("Could not load connections.");
+      } finally {
+        if (!cancelled) setConnsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [profile?.id]);
+
+  const openEditModal = (c: Connection) => {
+    setEditingId(c.id);
+    setName(c.name);
+    if (c.type === "llm") {
+      setOllamaUrl(c.ollamaUrl ?? "http://localhost:11434");
+      setOllamaModel(c.ollamaModel ?? "llama3");
+    } else {
+      setSubtype((c.subtype as DbSubtype) ?? "postgresql");
+      setHost(c.host ?? "");
+      setPort(c.port ?? "5432");
+      setDatabase(c.database ?? "");
+      setUsername(c.username ?? "");
+      setPassword(""); // never prefilled — server never returns it
+      setSslEnabled(Boolean(c.sslEnabled));
+      setAuthType(c.authType ?? "sql");
+      setDomain(c.domain ?? "");
+    }
+    setModalOpen(c.type as ConnType);
+  };
 
   const saveConnection = async () => {
     if (!name.trim() || !profile?.id) return;
 
-    const body = modalOpen === "llm"
+    const isLlm = modalOpen === "llm";
+    const body = isLlm
       ? { user_id: profile.id, name, type: "llm", subtype: "ollama", host: ollamaUrl, database_name: ollamaModel }
       : { user_id: profile.id, name, type: "database", subtype, host, port, database_name: database, username, password, ssl_enabled: sslEnabled, auth_type: authType, domain };
 
     try {
-      const res = await fetch("/api/connections", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error("Save failed");
+      const res = editingId
+        ? await fetch(`/api/connections/${editingId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          })
+        : await fetch("/api/connections", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+      if (!res.ok) throw new Error(editingId ? "Update failed" : "Save failed");
       const saved = await res.json();
+      const mapped = mapRow(saved);
 
-      setConnections((prev) => [...prev, {
-        id: saved.id, name: saved.name, type: saved.type, subtype: saved.subtype,
-        host: saved.host, port: saved.port, database: saved.database_name, username: saved.username,
-        sslEnabled: saved.ssl_enabled, status: saved.status,
-        ollamaUrl: saved.type === "llm" ? saved.host : undefined,
-        ollamaModel: saved.type === "llm" ? saved.database_name : undefined,
-      }]);
+      setConnections((prev) =>
+        editingId ? prev.map((c) => (c.id === editingId ? mapped : c)) : [...prev, mapped]
+      );
       closeModal();
     } catch {
-      console.error("Could not save connection.");
+      console.error(editingId ? "Could not update connection." : "Could not save connection.");
     }
   };
 
-  const removeConnection = (id: string) => {
-    setConnections((prev) => prev.filter((c) => c.id !== id));
+  const removeConnection = async (id: string) => {
+    const prevConnections = connections;
+    setConnections((prev) => prev.filter((c) => c.id !== id)); // optimistic
+    try {
+      const res = await fetch(`/api/connections/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Delete failed");
+    } catch {
+      console.error("Could not delete connection — restoring.");
+      setConnections(prevConnections); // rollback on failure
+    }
   };
 
   const testConnection = async (id: string) => {
@@ -141,6 +203,12 @@ export function ConnectionsPage({
           </p>
         </div>
 
+        {connsLoading && (
+          <p style={{ fontFamily: share, fontSize: "0.6rem", color: "#6e6e76", letterSpacing: "0.05em", marginBottom: "16px" }}>
+            Loading connections…
+          </p>
+        )}
+
         {/* section: databases */}
         <SectionHeader icon={<Database size={14} />} title="DIRECT DATABASE CONNECTIONS" onAdd={() => setModalOpen("database")} />
         {connections.filter((c) => c.type === "database").length === 0 ? (
@@ -148,7 +216,7 @@ export function ConnectionsPage({
         ) : (
           <div style={{ display: "grid", gap: "10px", marginBottom: "32px" }}>
             {connections.filter((c) => c.type === "database").map((c) => (
-              <ConnectionCard key={c.id} conn={c} onTest={() => testConnection(c.id)} onDelete={() => removeConnection(c.id)} />
+              <ConnectionCard key={c.id} conn={c} onTest={() => testConnection(c.id)} onEdit={() => openEditModal(c)} onDelete={() => removeConnection(c.id)} />
             ))}
           </div>
         )}
@@ -169,7 +237,7 @@ export function ConnectionsPage({
         ) : (
           <div style={{ display: "grid", gap: "10px" }}>
             {connections.filter((c) => c.type === "llm").map((c) => (
-              <ConnectionCard key={c.id} conn={c} onTest={() => testConnection(c.id)} onDelete={() => removeConnection(c.id)} />
+              <ConnectionCard key={c.id} conn={c} onTest={() => testConnection(c.id)} onEdit={() => openEditModal(c)} onDelete={() => removeConnection(c.id)} />
             ))}
           </div>
         )}
@@ -182,7 +250,9 @@ export function ConnectionsPage({
 
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "18px" }}>
               <span style={{ fontFamily: syn, fontWeight: 700, fontSize: "0.62rem", letterSpacing: "0.14em", color: MINT }}>
-                {modalOpen === "llm" ? "NEW LLM CONNECTION" : "NEW DATABASE CONNECTION"}
+                {editingId
+                  ? (modalOpen === "llm" ? "EDIT LLM CONNECTION" : "EDIT DATABASE CONNECTION")
+                  : (modalOpen === "llm" ? "NEW LLM CONNECTION" : "NEW DATABASE CONNECTION")}
               </span>
               <button onClick={closeModal} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#45454d" }}><X size={16} /></button>
             </div>
@@ -246,12 +316,13 @@ export function ConnectionsPage({
                 </div>
 
                 <div style={{ marginBottom: "14px" }}>
-                  <label style={labelStyle}>Password</label>
+                  <label style={labelStyle}>Password{editingId ? " (leave blank to keep current)" : ""}</label>
                   <div style={{ position: "relative" }}>
                     <input
                       type={showPassword ? "text" : "password"}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
+                      placeholder={editingId ? "unchanged" : ""}
                       style={{ ...inputStyle, paddingRight: "34px" }}
                     />
                     <button
@@ -297,7 +368,7 @@ export function ConnectionsPage({
                   background: `rgba(${MR},0.1)`, color: MINT, cursor: "pointer",
                 }}
               >
-                SAVE_CONNECTION
+                {editingId ? "UPDATE_CONNECTION" : "SAVE_CONNECTION"}
               </button>
               <button
                 onClick={closeModal}
@@ -339,7 +410,7 @@ function EmptyRow({ text }: { text: string }) {
   );
 }
 
-function ConnectionCard({ conn, onTest, onDelete }: { conn: Connection; onTest: () => void; onDelete: () => void }) {
+function ConnectionCard({ conn, onTest, onEdit, onDelete }: { conn: Connection; onTest: () => void; onEdit: () => void; onDelete: () => void }) {
   const statusColor = conn.status === "connected" ? MINT : conn.status === "failed" ? "#ED93B1" : "#45454d";
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#141418", border: `1px solid rgba(${MR},0.06)`, borderRadius: "12px", padding: "14px 16px" }}>
@@ -360,7 +431,10 @@ function ConnectionCard({ conn, onTest, onDelete }: { conn: Connection; onTest: 
         <button onClick={onTest} style={{ background: "transparent", border: `1px solid rgba(${MR},0.14)`, borderRadius: "6px", padding: "5px 10px", cursor: "pointer", color: "#9a9aa2", fontFamily: share, fontSize: "0.54rem" }}>
           TEST
         </button>
-        <button onClick={onDelete} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#45454d" }}>
+        <button onClick={onEdit} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#6e6e76" }} title="Edit connection">
+          <Pencil size={14} />
+        </button>
+        <button onClick={onDelete} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#45454d" }} title="Delete connection">
           <Trash2 size={14} />
         </button>
       </div>

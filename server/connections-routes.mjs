@@ -25,7 +25,7 @@ function sendJson(res, status, payload) {
   res.writeHead(status, {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(JSON.stringify(payload));
@@ -173,6 +173,33 @@ export async function handleCreateConnection(req, res) {
   const { data, error } = await supabaseAdmin
     .from("connections")
     .insert({ user_id, name, type, subtype, host, port, database_name, username, encrypted_secret, ssl_enabled: Boolean(ssl_enabled), auth_type: auth_type ?? "sql", domain, status: "untested" })
+    .select()
+    .single();
+
+  if (error) return sendJson(res, 500, { error: error.message });
+  sendJson(res, 200, toSafeConnection(data));
+}
+
+export async function handleUpdateConnection(req, res, id) {
+  if (!supabaseAdmin) return sendJson(res, 500, { error: "Supabase admin not configured." });
+
+  const { name, host, port, database_name, username, password, ssl_enabled, auth_type, domain } = await readRequestBody(req);
+  if (!name) return sendJson(res, 400, { error: "name required." });
+
+  const update = {
+    name, host, port, database_name, username,
+    ssl_enabled: Boolean(ssl_enabled), auth_type: auth_type ?? "sql", domain,
+    status: "untested", last_tested_at: null, // creds/host may have changed — force re-test
+  };
+
+  if (password) {
+    update.encrypted_secret = encryptSecret(password);
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("connections")
+    .update(update)
+    .eq("id", id)
     .select()
     .single();
 

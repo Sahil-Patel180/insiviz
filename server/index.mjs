@@ -18,6 +18,7 @@ import { createAccessRequest } from "./access-request-store.js";
 import {
   handleListConnections,
   handleCreateConnection,
+  handleUpdateConnection,
   handleDeleteConnection,
   handleTestConnection,
   handleListTables,
@@ -35,7 +36,7 @@ function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(JSON.stringify(payload));
@@ -189,7 +190,7 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  if (!["POST", "GET", "DELETE"].includes(req.method)) {
+  if (!["POST", "GET", "DELETE", "PATCH"].includes(req.method)) {
     sendJson(res, 405, { success: false });
     return;
   }
@@ -245,9 +246,13 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    const deleteMatch = url.pathname.match(/^\/api\/connections\/([^/]+)$/);
-    if (deleteMatch && req.method === "DELETE") {
-      await handleDeleteConnection(req, res, deleteMatch[1]);
+    const idMatch = url.pathname.match(/^\/api\/connections\/([^/]+)$/);
+    if (idMatch && req.method === "DELETE") {
+      await handleDeleteConnection(req, res, idMatch[1]);
+      return;
+    }
+    if (idMatch && req.method === "PATCH") {
+      await handleUpdateConnection(req, res, idMatch[1]);
       return;
     }
 
