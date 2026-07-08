@@ -24,6 +24,15 @@ import {
   handleListTables,
   handleFetchTableData,
 } from "./connections-routes.mjs";
+import {
+  handleListProjectTree,
+  handleCreateProject,
+  handleCreateFolder,
+  handleCreateDataset,
+  handleGetDataset,
+  handleUpdateDataset,
+  handleDeleteDataset,
+} from "./datasets-routes.mjs";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
@@ -253,6 +262,40 @@ const server = createServer(async (req, res) => {
     }
     if (idMatch && req.method === "PATCH") {
       await handleUpdateConnection(req, res, idMatch[1]);
+      return;
+    }
+
+    if (url.pathname === "/api/projects" && req.method === "GET") {
+      await handleListProjectTree(req, res, url);
+      return;
+    }
+
+    if (url.pathname === "/api/projects" && req.method === "POST") {
+      await handleCreateProject(req, res);
+      return;
+    }
+
+    if (url.pathname === "/api/folders" && req.method === "POST") {
+      await handleCreateFolder(req, res);
+      return;
+    }
+
+    if (url.pathname === "/api/datasets" && req.method === "POST") {
+      await handleCreateDataset(req, res);
+      return;
+    }
+
+    const datasetIdMatch = url.pathname.match(/^\/api\/datasets\/([^/]+)$/);
+    if (datasetIdMatch && req.method === "GET") {
+      await handleGetDataset(req, res, datasetIdMatch[1]);
+      return;
+    }
+    if (datasetIdMatch && req.method === "PATCH") {
+      await handleUpdateDataset(req, res, datasetIdMatch[1]);
+      return;
+    }
+    if (datasetIdMatch && req.method === "DELETE") {
+      await handleDeleteDataset(req, res, datasetIdMatch[1]);
       return;
     }
 

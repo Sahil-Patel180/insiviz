@@ -1,8 +1,8 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Plus, Search, ChevronRight, ChevronDown,
   Folder, FolderOpen, Upload, FileSpreadsheet,
-  FileJson, FileText, X, Database, Server
+  FileJson, FileText, X, Database, Server, Eye, Pencil, Trash2, Save, Check
 } from "lucide-react";
 import type { Profile } from "../lib/auth";
 import { AppNav } from "./AppNav";
@@ -12,6 +12,7 @@ const MR    = "122,255,200";
 const share = "'Share Tech Mono', monospace";
 const mono  = "'JetBrains Mono', monospace";
 const syn   = "'Syncopate', sans-serif";
+const MAX_ROWS = 500;
 
 // ── types ─────────────────────────────────────────────────────────────────
 
@@ -26,11 +27,15 @@ type Dataset = {
   cols: number | null;
   sizeKb: number | null;
   uploadedAt: string;
+  projectId: string;
+  folderId: string | null;
 };
 
 type FolderNode = {
   id: string;
   name: string;
+  projectId: string;
+  parentFolderId: string | null;
   children: FolderNode[];
   datasets: Dataset[];
 };
@@ -40,6 +45,12 @@ type Project = {
   name: string;
   subfolders: FolderNode[];
   datasets: Dataset[];
+};
+
+type RawFolder = { id: string; name: string; project_id: string; parent_folder_id: string | null };
+type RawDataset = {
+  id: string; name: string; type: DatasetType; project_id: string; folder_id: string | null;
+  row_count: number | null; col_count: number | null; size_kb: number | null; created_at: string;
 };
 
 // ── constants ─────────────────────────────────────────────────────────────
@@ -73,7 +84,60 @@ function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-// ── tree state helpers ────────────────────────────────────────────────────
+// naive CSV/TSV parser — no quoted-delimiter escaping. Fine for plain exports; flag if you need RFC4180 quoting.
+function parseDelimited(text: string, delimiter: string): { columns: string[]; rows: Record<string, string>[] } {
+  const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
+  if (lines.length === 0) return { columns: [], rows: [] };
+  const columns = lines[0].split(delimiter).map((c) => c.trim());
+  const rows = lines.slice(1, MAX_ROWS + 1).map((line) => {
+    const cells = line.split(delimiter);
+    const row: Record<string, string> = {};
+    columns.forEach((c, i) => { row[c] = cells[i] ?? ""; });
+    return row;
+  });
+  return { columns, rows };
+}
+
+function parseJsonFile(text: string): { columns: string[]; rows: Record<string, any>[] } {
+  const parsed = JSON.parse(text);
+  const arr = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.data) ? parsed.data : [parsed];
+  const rows = arr.slice(0, MAX_ROWS);
+  const columns = rows[0] ? Object.keys(rows[0]) : [];
+  return { columns, rows };
+}
+
+async function parseXlsxFile(file: File): Promise<{ columns: string[]; rows: Record<string, any>[] }> {
+  // requires `npm install xlsx` (SheetJS) in the project — not wired in package.json yet
+  const XLSX = await import("xlsx");
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" }) as Record<string, any>[];
+  const capped = rows.slice(0, MAX_ROWS);
+  const columns = capped[0] ? Object.keys(capped[0]) : [];
+  return { columns, rows: capped };
+}
+
+// ── build nested tree from flat backend rows ─────────────────────────────
+
+function buildProjects(rawProjects: { id: string; name: string }[], rawFolders: RawFolder[], rawDatasets: RawDataset[]): Project[] {
+  const toDataset = (d: RawDataset): Dataset => ({
+    id: d.id, name: d.name, type: d.type, rows: d.row_count, cols: d.col_count,
+    sizeKb: d.size_kb, uploadedAt: d.created_at, projectId: d.project_id, folderId: d.folder_id,
+  });
+
+  const buildFolder = (f: RawFolder): FolderNode => ({
+    id: f.id, name: f.name, projectId: f.project_id, parentFolderId: f.parent_folder_id,
+    children: rawFolders.filter((c) => c.parent_folder_id === f.id).map(buildFolder),
+    datasets: rawDatasets.filter((d) => d.folder_id === f.id).map(toDataset),
+  });
+
+  return rawProjects.map((p) => ({
+    id: p.id, name: p.name,
+    subfolders: rawFolders.filter((f) => f.project_id === p.id && f.parent_folder_id === null).map(buildFolder),
+    datasets: rawDatasets.filter((d) => d.project_id === p.id && d.folder_id === null).map(toDataset),
+  }));
+}
 
 function findFolderInTree(folders: FolderNode[], id: string): FolderNode | null {
   for (const f of folders) {
@@ -96,40 +160,6 @@ function resolveSelected(
     if (f) return { type: "folder", node: f };
   }
   return null;
-}
-
-function mutateFolderInTree(
-  folders: FolderNode[],
-  targetId: string,
-  fn: (f: FolderNode) => FolderNode
-): FolderNode[] {
-  return folders.map((f) =>
-    f.id === targetId ? fn(f) : { ...f, children: mutateFolderInTree(f.children, targetId, fn) }
-  );
-}
-
-function addToNode(
-  projects: Project[],
-  targetId: string,
-  payload: { dataset?: Dataset; folder?: FolderNode }
-): Project[] {
-  return projects.map((p) => {
-    if (p.id === targetId) {
-      return {
-        ...p,
-        datasets: payload.dataset ? [...p.datasets, payload.dataset] : p.datasets,
-        subfolders: payload.folder ? [...p.subfolders, payload.folder] : p.subfolders,
-      };
-    }
-    return {
-      ...p,
-      subfolders: mutateFolderInTree(p.subfolders, targetId, (f) => ({
-        ...f,
-        datasets: payload.dataset ? [...f.datasets, payload.dataset] : f.datasets,
-        children: payload.folder ? [...f.children, payload.folder] : f.children,
-      })),
-    };
-  });
 }
 
 // ── Recursive folder tree (sidebar) ──────────────────────────────────────
@@ -213,6 +243,7 @@ export function DataDeckPage({
   onNavigate: (page: string) => void;
 }) {
   const [projects, setProjects]               = useState<Project[]>([]);
+  const [treeLoading, setTreeLoading]         = useState(true);
   const [selectedId, setSelectedId]           = useState<string | null>(null);
   const [expandedIds, setExpandedIds]         = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery]         = useState("");
@@ -225,10 +256,40 @@ export function DataDeckPage({
   const [connections, setConnections]         = useState<{ id: string; name: string; type: string; subtype: string; status: string }[]>([]);
   const [selectedConnId, setSelectedConnId]   = useState<string | null>(null);
   const [tables, setTables]                   = useState<string[]>([]);
-  const [selectedTable, setSelectedTable]     = useState<string | null>(null);
+  const [selectedTables, setSelectedTables]   = useState<Set<string>>(new Set());
   const [fetchStep, setFetchStep]             = useState<"pick-connection" | "pick-table" | "loading" | "error">("pick-connection");
   const [fetchError, setFetchError]           = useState<string | null>(null);
+  const [uploadError, setUploadError]         = useState<string | null>(null);
+
+  // preview / edit / delete modal state
+  const [activeDataset, setActiveDataset]     = useState<Dataset | null>(null);
+  const [gridColumns, setGridColumns]         = useState<string[]>([]);
+  const [gridRows, setGridRows]               = useState<Record<string, any>[]>([]);
+  const [gridLoading, setGridLoading]         = useState(false);
+  const [gridEditing, setGridEditing]         = useState(false);
+  const [gridDirty, setGridDirty]             = useState(false);
+  const [gridSaving, setGridSaving]           = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── fetch full project/folder/dataset tree on mount ──
+
+  const loadTree = async () => {
+    if (!profile?.id) { setTreeLoading(false); return; }
+    setTreeLoading(true);
+    try {
+      const res = await fetch(`/api/projects?user_id=${profile.id}`);
+      if (!res.ok) throw new Error("Load failed");
+      const { projects: rp, folders: rf, datasets: rd } = await res.json();
+      setProjects(buildProjects(rp, rf, rd));
+    } catch {
+      console.error("Could not load DataDeck contents.");
+    } finally {
+      setTreeLoading(false);
+    }
+  };
+
+  useEffect(() => { loadTree(); }, [profile?.id]);
 
   const selected = resolveSelected(projects, selectedId);
 
@@ -258,43 +319,95 @@ export function DataDeckPage({
 
   // ── actions ──
 
-  const createProject = () => {
+  const createProject = async () => {
     const name = newProjectName.trim();
-    if (!name) return;
-    const id = crypto.randomUUID();
-    setProjects((prev) => [...prev, { id, name, subfolders: [], datasets: [] }]);
-    setSelectedId(id);
-    setExpandedIds((prev) => new Set([...prev, id]));
+    if (!name || !profile?.id) return;
+    try {
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: profile.id, name }),
+      });
+      const saved = await res.json();
+      if (!res.ok) throw new Error(saved.error || "Create failed");
+      await loadTree();
+      setSelectedId(saved.id);
+      setExpandedIds((prev) => new Set([...prev, saved.id]));
+    } catch {
+      console.error("Could not create project.");
+    }
     setNewProjectName("");
     setCreatingProject(false);
   };
 
-  const createFolder = () => {
+  const createFolder = async () => {
     const name = newFolderName.trim();
-    if (!name || !selectedId) return;
-    const newFolder: FolderNode = { id: crypto.randomUUID(), name, children: [], datasets: [] };
-    setProjects((prev) => addToNode(prev, selectedId, { folder: newFolder }));
-    setExpandedIds((prev) => new Set([...prev, selectedId]));
+    if (!name || !selectedId || !profile?.id) return;
+    const project_id = selected?.type === "project" ? selected.node.id : selected?.node ? (selected.node as FolderNode).projectId : null;
+    const parent_folder_id = selected?.type === "folder" ? selected.node.id : null;
+    if (!project_id) return;
+    try {
+      const res = await fetch("/api/folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: profile.id, project_id, parent_folder_id, name }),
+      });
+      const saved = await res.json();
+      if (!res.ok) throw new Error(saved.error || "Create failed");
+      await loadTree();
+      setExpandedIds((prev) => new Set([...prev, selectedId]));
+    } catch {
+      console.error("Could not create folder.");
+    }
     setNewFolderName("");
     setCreatingFolder(false);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  // resolve project_id/folder_id for wherever is currently selected
+  const currentTarget = (): { project_id: string; folder_id: string | null } | null => {
+    if (!selected) return null;
+    if (selected.type === "project") return { project_id: selected.node.id, folder_id: null };
+    return { project_id: selected.node.projectId, folder_id: selected.node.id };
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!file || !selectedId) return;
-    const ext = file.name.split(".").pop()?.toLowerCase();
-    if (!ext || !["csv", "json", "xlsx", "tsv"].includes(ext)) return;
-    const dataset: Dataset = {
-      id: crypto.randomUUID(),
-      name: file.name,
-      type: ext as DatasetType,
-      rows: null,
-      cols: null,
-      sizeKb: Math.round(file.size / 1024),
-      uploadedAt: new Date().toISOString(),
-    };
-    setProjects((prev) => addToNode(prev, selectedId, { dataset }));
+    const target = currentTarget();
+    if (files.length === 0 || !target || !profile?.id) return;
+    setUploadError(null);
+
+    for (const file of files) {
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      if (!ext || !["csv", "json", "xlsx", "tsv"].includes(ext)) continue;
+
+      try {
+        let columns: string[] = [];
+        let rows: Record<string, any>[] = [];
+
+        if (ext === "csv") ({ columns, rows } = parseDelimited(await file.text(), ","));
+        else if (ext === "tsv") ({ columns, rows } = parseDelimited(await file.text(), "\t"));
+        else if (ext === "json") ({ columns, rows } = parseJsonFile(await file.text()));
+        else ({ columns, rows } = await parseXlsxFile(file));
+
+        const res = await fetch("/api/datasets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: profile.id, project_id: target.project_id, folder_id: target.folder_id,
+            name: file.name, type: ext, source: "upload", columns, data: rows,
+          }),
+        });
+        if (!res.ok) { const e2 = await res.json(); throw new Error(e2.error || "Save failed"); }
+      } catch (err: any) {
+        setUploadError(
+          ext === "xlsx" && /Cannot find module|Failed to fetch dynamically imported module/.test(err.message ?? "")
+            ? "XLSX parsing needs the 'xlsx' package — run `npm install xlsx` in Codespaces, then retry."
+            : `${file.name}: ${err.message ?? "upload failed"}`
+        );
+      }
+    }
+    await loadTree();
   };
 
   const toggleExpand = (id: string) => {
@@ -308,6 +421,71 @@ export function DataDeckPage({
   const selectAndExpand = (id: string) => {
     setSelectedId(id);
     setExpandedIds((prev) => new Set([...prev, id]));
+  };
+
+  // ── preview / edit / delete ──
+
+  const openDataset = async (d: Dataset) => {
+    setActiveDataset(d);
+    setGridEditing(false);
+    setGridDirty(false);
+    setGridLoading(true);
+    try {
+      const res = await fetch(`/api/datasets/${d.id}`);
+      const full = await res.json();
+      if (!res.ok) throw new Error(full.error || "Load failed");
+      setGridColumns(full.columns ?? []);
+      setGridRows((full.data ?? []).slice(0, 50));
+    } catch {
+      setGridColumns([]);
+      setGridRows([]);
+    } finally {
+      setGridLoading(false);
+    }
+  };
+
+  const closeDatasetModal = () => {
+    setActiveDataset(null);
+    setGridColumns([]);
+    setGridRows([]);
+    setGridEditing(false);
+    setGridDirty(false);
+  };
+
+  const updateCell = (rowIdx: number, col: string, value: string) => {
+    setGridRows((prev) => prev.map((r, i) => (i === rowIdx ? { ...r, [col]: value } : r)));
+    setGridDirty(true);
+  };
+
+  const saveGridEdits = async () => {
+    if (!activeDataset) return;
+    setGridSaving(true);
+    try {
+      const res = await fetch(`/api/datasets/${activeDataset.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: gridRows }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      setGridDirty(false);
+      setGridEditing(false);
+      await loadTree();
+    } catch {
+      console.error("Could not save edits.");
+    } finally {
+      setGridSaving(false);
+    }
+  };
+
+  const deleteDataset = async (d: Dataset) => {
+    try {
+      const res = await fetch(`/api/datasets/${d.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Delete failed");
+      if (activeDataset?.id === d.id) closeDatasetModal();
+      await loadTree();
+    } catch {
+      console.error("Could not delete dataset.");
+    }
   };
 
   // ── shared button styles ──
@@ -333,198 +511,98 @@ export function DataDeckPage({
 
   return (
     <div style={{ minHeight: "100vh", background: "#0d0d0f", display: "flex", flexDirection: "column" }}>
-      <AppNav active="DataDeck" profile={profile} onLogout={onLogout} onNavigate={onNavigate} />
+      <AppNav profile={profile} onLogout={onLogout} onNavigate={onNavigate} active="DataDeck" />
 
-      <div style={{ display: "flex", flex: 1, overflow: "hidden", height: "calc(100vh - 60px)" }}>
+      <div style={{ display: "flex", flex: 1 }}>
+        {/* ── sidebar ── */}
+        <aside style={{ width: "260px", borderRight: `1px solid rgba(${MR},0.06)`, padding: "18px 12px", overflowY: "auto" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px", padding: "0 4px" }}>
+            <span style={{ fontFamily: syn, fontWeight: 700, fontSize: "0.6rem", letterSpacing: "0.12em", color: "#6e6e76" }}>PROJECTS</span>
+            <button onClick={() => setCreatingProject(true)} style={{ background: "transparent", border: "none", cursor: "pointer", color: MINT }}>
+              <Plus size={14} />
+            </button>
+          </div>
 
-        {/* ══ SIDEBAR ══════════════════════════════════════════════════════ */}
-        <aside
-          style={{
-            width: "262px", flexShrink: 0,
-            background: "#141418",
-            borderRight: `1px solid rgba(${MR},0.07)`,
-            display: "flex", flexDirection: "column",
-            overflowY: "auto",
-          }}
-        >
-          {/* header */}
-          <div style={{ padding: "16px 12px 10px", borderBottom: `1px solid rgba(${MR},0.06)` }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
-              <span style={{ fontFamily: syn, fontWeight: 700, fontSize: "0.56rem", letterSpacing: "0.16em", color: MINT }}>
-                DATA DECK
-              </span>
-              <button
-                onClick={() => { setCreatingProject(true); setCreatingFolder(false); }}
-                style={{ background: "transparent", border: "none", cursor: "pointer", color: MINT, display: "flex", alignItems: "center", gap: "4px", fontFamily: share, fontSize: "0.58rem", letterSpacing: "0.08em" }}
-              >
-                <Plus size={12} /> PROJECT
-              </button>
-            </div>
+          <div style={{ position: "relative", marginBottom: "14px" }}>
+            <Search size={12} color="#45454d" style={{ position: "absolute", left: "10px", top: "9px" }} />
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search..."
+              style={{
+                width: "100%", background: "#141418", border: `1px solid rgba(${MR},0.08)`,
+                borderRadius: "8px", padding: "7px 10px 7px 28px", color: "#e8e8ea",
+                fontFamily: mono, fontSize: "0.68rem", outline: "none",
+              }}
+            />
+          </div>
 
-            {/* inline new project input */}
-            {creatingProject && (
-              <div style={{ display: "flex", gap: "6px", marginBottom: "10px" }}>
-                <input
-                  autoFocus
-                  value={newProjectName}
-                  onChange={(e) => setNewProjectName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") createProject();
-                    if (e.key === "Escape") { setCreatingProject(false); setNewProjectName(""); }
-                  }}
-                  placeholder="project name…"
-                  style={{
-                    flex: 1, background: "#0d0d0f",
-                    border: `1px solid rgba(${MR},0.2)`, borderRadius: "6px",
-                    padding: "6px 8px", fontFamily: mono, fontSize: "0.65rem",
-                    color: "#e8e8ea", outline: "none",
-                  }}
-                />
-                <button onClick={createProject} style={{ background: "transparent", border: "none", cursor: "pointer", color: MINT }}>
-                  <Plus size={14} />
-                </button>
-                <button onClick={() => { setCreatingProject(false); setNewProjectName(""); }} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#45454d" }}>
-                  <X size={14} />
-                </button>
-              </div>
-            )}
-
-            {/* search */}
-            <div style={{ position: "relative" }}>
-              <Search size={12} color="#45454d" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+          {creatingProject && (
+            <div style={{ display: "flex", gap: "6px", marginBottom: "10px" }}>
               <input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search projects & datasets…"
-                style={{
-                  width: "100%", background: "#0d0d0f",
-                  border: `1px solid rgba(${MR},0.06)`, borderRadius: "8px",
-                  padding: "7px 8px 7px 28px",
-                  fontFamily: mono, fontSize: "0.63rem", color: "#e8e8ea",
-                  outline: "none", boxSizing: "border-box",
-                }}
+                autoFocus
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && createProject()}
+                placeholder="Project name"
+                style={{ flex: 1, background: "#141418", border: `1px solid rgba(${MR},0.15)`, borderRadius: "6px", padding: "6px 8px", color: "#e8e8ea", fontFamily: mono, fontSize: "0.65rem", outline: "none" }}
               />
+              <button onClick={createProject} style={{ background: "transparent", border: "none", cursor: "pointer", color: MINT }}><Plus size={14} /></button>
+              <button onClick={() => setCreatingProject(false)} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#45454d" }}><X size={14} /></button>
             </div>
-          </div>
-
-          {/* project tree */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "10px 8px" }}>
-            {projects.length === 0 ? (
-              <p style={{ fontFamily: share, fontSize: "0.58rem", color: "#45454d", textAlign: "center", marginTop: "28px", letterSpacing: "0.06em", lineHeight: 1.8 }}>
-                No projects yet.<br />Create one above.
-              </p>
-            ) : (
-              (searchQuery ? filteredProjects : projects).map((proj) => {
-                const isOpen   = expandedIds.has(proj.id);
-                const isActive = selectedId === proj.id;
-                return (
-                  <div key={proj.id}>
-                    <button
-                      onClick={() => { toggleExpand(proj.id); setSelectedId(proj.id); }}
-                      style={{
-                        display: "flex", alignItems: "center", gap: "6px",
-                        width: "100%", padding: "8px 8px",
-                        background: isActive ? `rgba(${MR},0.08)` : "transparent",
-                        border: "none", borderRadius: "8px", cursor: "pointer",
-                        color: isActive ? MINT : "#c8c8d0",
-                        fontFamily: mono, fontSize: "0.72rem", textAlign: "left",
-                      }}
-                    >
-                      {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                      {isOpen
-                        ? <FolderOpen size={15} color={isActive ? MINT : "#9a9aa2"} />
-                        : <Folder size={15} color={isActive ? MINT : "#9a9aa2"} />
-                      }
-                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{proj.name}</span>
-                      <span style={{ fontFamily: share, fontSize: "0.48rem", color: "#45454d", background: "#1e1e25", padding: "2px 6px", borderRadius: "999px" }}>
-                        {proj.subfolders.length + proj.datasets.length}
-                      </span>
-                    </button>
-                    {isOpen && (
-                      <FolderTree
-                        folders={proj.subfolders}
-                        selectedId={selectedId}
-                        expandedIds={expandedIds}
-                        onSelect={setSelectedId}
-                        onToggle={toggleExpand}
-                        depth={1}
-                      />
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </aside>
-
-        {/* ══ MAIN PANEL ═══════════════════════════════════════════════════ */}
-        <main style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
-
-          {/* ── nothing selected: show all project cards ── */}
-          {!selectedId && (
-            <>
-              <p style={{ fontFamily: share, fontSize: "0.6rem", letterSpacing: "0.1em", color: "#6e6e76", marginBottom: "16px" }}>
-                // PROJECTS
-              </p>
-              {projects.length === 0 ? (
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px", minHeight: "320px", textAlign: "center" }}>
-                  <Database size={30} color="#2a2a32" />
-                  <p style={{ fontFamily: share, fontSize: "0.66rem", letterSpacing: "0.07em", color: "#6e6e76", lineHeight: 1.9 }}>
-                    No projects yet.<br />Create a project to start organizing datasets.
-                  </p>
-                  <button
-                    onClick={() => setCreatingProject(true)}
-                    style={{
-                      fontFamily: syn, fontWeight: 700, fontSize: "0.58rem", letterSpacing: "0.18em",
-                      padding: "13px 24px", borderRadius: "10px",
-                      border: `1px solid rgba(${MR},0.22)`, cursor: "pointer",
-                      background: `linear-gradient(135deg,rgba(${MR},0.13) 0%,rgba(${MR},0.06) 100%)`,
-                      color: MINT,
-                    }}
-                  >
-                    + NEW_PROJECT
-                  </button>
-                </div>
-              ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))", gap: "14px" }}>
-                  {projects.map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => selectAndExpand(p.id)}
-                      style={{
-                        background: "#141418", borderRadius: "14px", padding: "18px 16px",
-                        border: `1px solid rgba(${MR},0.07)`, cursor: "pointer", textAlign: "left",
-                        boxShadow: "5px 5px 12px #0a0a0c,-3px -3px 8px #1e1e25",
-                        transition: "border-color 0.15s",
-                      }}
-                      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.borderColor = `rgba(${MR},0.22)`)}
-                      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.borderColor = `rgba(${MR},0.07)`)}
-                    >
-                      <Folder size={24} color="#45454d" style={{ marginBottom: "12px" }} />
-                      <p style={{ fontFamily: mono, fontSize: "0.78rem", color: "#e8e8ea", margin: "0 0 5px", fontWeight: 500 }}>{p.name}</p>
-                      <p style={{ fontFamily: share, fontSize: "0.56rem", color: "#6e6e76", margin: 0 }}>
-                        {p.subfolders.length} folder{p.subfolders.length !== 1 ? "s" : ""} · {p.datasets.length} dataset{p.datasets.length !== 1 ? "s" : ""}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
           )}
 
-          {/* ── project or folder selected ── */}
-          {selectedId && selected && (
-            <>
-              {/* breadcrumb + action buttons */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "24px", flexWrap: "wrap", gap: "10px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {treeLoading ? (
+            <p style={{ fontFamily: share, fontSize: "0.6rem", color: "#45454d", padding: "8px" }}>Loading…</p>
+          ) : filteredProjects.length === 0 ? (
+            <p style={{ fontFamily: share, fontSize: "0.6rem", color: "#45454d", padding: "8px" }}>No projects yet.</p>
+          ) : (
+            filteredProjects.map((p) => {
+              const isOpen   = expandedIds.has(p.id);
+              const isActive = selectedId === p.id;
+              return (
+                <div key={p.id}>
                   <button
-                    onClick={() => setSelectedId(null)}
-                    style={{ background: "transparent", border: "none", cursor: "pointer", color: "#6e6e76", fontFamily: share, fontSize: "0.6rem", letterSpacing: "0.08em" }}
+                    onClick={() => selectAndExpand(p.id)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: "6px", width: "100%",
+                      padding: "7px 8px", background: isActive ? `rgba(${MR},0.08)` : "transparent",
+                      border: "none", borderRadius: "8px", cursor: "pointer",
+                      color: isActive ? MINT : "#c8c8ce", fontFamily: mono, fontSize: "0.72rem", textAlign: "left",
+                    }}
                   >
-                    DataDeck
+                    {(p.subfolders.length > 0)
+                      ? isOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />
+                      : <span style={{ width: 11 }} />}
+                    <Database size={13} color={isActive ? MINT : "#6e6e76"} />
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
                   </button>
-                  <ChevronRight size={12} color="#45454d" />
+                  {isOpen && (
+                    <FolderTree
+                      folders={p.subfolders}
+                      selectedId={selectedId}
+                      expandedIds={expandedIds}
+                      onSelect={selectAndExpand}
+                      onToggle={toggleExpand}
+                    />
+                  )}
+                </div>
+              );
+            })
+          )}
+        </aside>
+
+        {/* ── main panel ── */}
+        <main style={{ flex: 1, padding: "22px 28px" }}>
+          {!selected ? (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "60vh", gap: "10px" }}>
+              <Database size={32} color="#2a2a30" />
+              <p style={{ fontFamily: share, fontSize: "0.64rem", color: "#45454d", letterSpacing: "0.06em" }}>Select or create a project to get started.</p>
+            </div>
+          ) : (
+            <>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "18px", flexWrap: "wrap", gap: "10px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <span style={{ fontFamily: mono, fontSize: "0.78rem", color: "#e8e8ea", fontWeight: 500 }}>{breadcrumb}</span>
                 </div>
 
@@ -532,7 +610,7 @@ export function DataDeckPage({
                   <button onClick={() => setCreatingFolder(true)} style={ghostBtn}>
                     <Folder size={12} /> + SUBFOLDER
                   </button>
-                  <input ref={fileInputRef} type="file" accept=".csv,.json,.xlsx,.tsv" style={{ display: "none" }} onChange={handleFileUpload} />
+                  <input ref={fileInputRef} type="file" accept=".csv,.json,.xlsx,.tsv" multiple style={{ display: "none" }} onChange={handleFileUpload} />
                   <button onClick={() => fileInputRef.current?.click()} style={mintBtn}>
                     <Upload size={12} /> UPLOAD_DATASET
                   </button>
@@ -541,6 +619,7 @@ export function DataDeckPage({
                       setFetchModalOpen(true);
                       setFetchStep("pick-connection");
                       setFetchError(null);
+                      setSelectedTables(new Set());
                       if (!profile?.id) return;
                       try {
                         const res = await fetch(`/api/connections?user_id=${profile.id}`);
@@ -559,79 +638,37 @@ export function DataDeckPage({
                 </div>
               </div>
 
-              {/* inline new subfolder input */}
+              {uploadError && (
+                <p style={{ fontFamily: share, fontSize: "0.6rem", color: "#ED93B1", marginBottom: "14px" }}>{uploadError}</p>
+              )}
+
               {creatingFolder && (
-                <div style={{ display: "flex", gap: "8px", marginBottom: "16px", maxWidth: "340px" }}>
+                <div style={{ display: "flex", gap: "6px", marginBottom: "16px" }}>
                   <input
                     autoFocus
                     value={newFolderName}
                     onChange={(e) => setNewFolderName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") createFolder();
-                      if (e.key === "Escape") { setCreatingFolder(false); setNewFolderName(""); }
-                    }}
-                    placeholder="folder name…"
-                    style={{
-                      flex: 1, background: "#141418",
-                      border: `1px solid rgba(${MR},0.2)`, borderRadius: "8px",
-                      padding: "8px 12px", fontFamily: mono, fontSize: "0.68rem",
-                      color: "#e8e8ea", outline: "none",
-                    }}
+                    onKeyDown={(e) => e.key === "Enter" && createFolder()}
+                    placeholder="Folder name"
+                    style={{ background: "#141418", border: `1px solid rgba(${MR},0.15)`, borderRadius: "6px", padding: "7px 10px", color: "#e8e8ea", fontFamily: mono, fontSize: "0.68rem", outline: "none" }}
                   />
-                  <button onClick={createFolder} style={{ ...mintBtn, padding: "8px 14px" }}>CREATE</button>
-                  <button onClick={() => { setCreatingFolder(false); setNewFolderName(""); }} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#45454d" }}>
-                    <X size={14} />
-                  </button>
+                  <button onClick={createFolder} style={mintBtn}><Check size={12} /> ADD</button>
+                  <button onClick={() => setCreatingFolder(false)} style={ghostBtn}><X size={12} /> CANCEL</button>
                 </div>
               )}
 
-              {/* subfolder cards */}
-              {panelFolders.length > 0 && (
-                <>
-                  <p style={{ fontFamily: share, fontSize: "0.58rem", letterSpacing: "0.1em", color: "#6e6e76", marginBottom: "12px" }}>
-                    // FOLDERS
-                  </p>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(155px,1fr))", gap: "12px", marginBottom: "28px" }}>
-                    {panelFolders.map((f) => (
-                      <button
-                        key={f.id}
-                        onClick={() => selectAndExpand(f.id)}
-                        style={{
-                          background: "#141418", borderRadius: "12px", padding: "16px 14px",
-                          border: `1px solid rgba(${MR},0.07)`, cursor: "pointer", textAlign: "left",
-                          boxShadow: "4px 4px 10px #0a0a0c,-2px -2px 6px #1e1e25",
-                          transition: "border-color 0.15s",
-                        }}
-                        onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.borderColor = `rgba(${MR},0.2)`)}
-                        onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.borderColor = `rgba(${MR},0.07)`)}
-                      >
-                        <Folder size={20} color="#45454d" style={{ marginBottom: "8px" }} />
-                        <p style={{ fontFamily: mono, fontSize: "0.72rem", color: "#e8e8ea", margin: "0 0 4px", fontWeight: 500 }}>{f.name}</p>
-                        <p style={{ fontFamily: share, fontSize: "0.54rem", color: "#6e6e76", margin: 0 }}>
-                          {f.children.length + f.datasets.length} item{(f.children.length + f.datasets.length) !== 1 ? "s" : ""}
-                        </p>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-
-              {/* datasets section */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", flexWrap: "wrap", gap: "8px" }}>
-                <p style={{ fontFamily: share, fontSize: "0.58rem", letterSpacing: "0.1em", color: "#6e6e76", margin: 0 }}>
-                  // DATASETS
-                </p>
-                {/* type filter chips */}
-                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px" }}>
+                <span style={{ fontFamily: share, fontSize: "0.56rem", letterSpacing: "0.1em", color: "#45454d" }}>
+                  {filteredDatasets.length} DATASET{filteredDatasets.length !== 1 ? "S" : ""}
+                </span>
+                <div style={{ display: "flex", gap: "4px" }}>
                   {FILTER_OPTIONS.map((t) => (
                     <button
                       key={t}
                       onClick={() => setTypeFilter(t)}
                       style={{
-                        fontFamily: share, fontSize: "0.52rem", letterSpacing: "0.08em",
-                        padding: "4px 10px", borderRadius: "999px",
-                        border: `1px solid ${typeFilter === t ? `rgba(${MR},0.3)` : `rgba(${MR},0.08)`}`,
-                        background: typeFilter === t ? `rgba(${MR},0.1)` : "transparent",
+                        background: "transparent", border: "none", padding: "4px 8px",
+                        fontFamily: share, fontSize: "0.56rem", letterSpacing: "0.06em",
                         color: typeFilter === t ? MINT : "#6e6e76",
                         cursor: "pointer",
                       }}
@@ -657,8 +694,8 @@ export function DataDeckPage({
               ) : (
                 <div style={{ background: "#141418", borderRadius: "12px", border: `1px solid rgba(${MR},0.07)`, overflow: "hidden" }}>
                   {/* table header */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 70px 80px 130px", padding: "10px 16px", borderBottom: `1px solid rgba(${MR},0.07)` }}>
-                    {["Name", "Type", "Size", "Rows", "Uploaded"].map((h) => (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 70px 80px 130px 90px", padding: "10px 16px", borderBottom: `1px solid rgba(${MR},0.07)` }}>
+                    {["Name", "Type", "Size", "Rows", "Uploaded", ""].map((h) => (
                       <span key={h} style={{ fontFamily: share, fontSize: "0.52rem", letterSpacing: "0.1em", color: "#45454d" }}>{h}</span>
                     ))}
                   </div>
@@ -667,7 +704,7 @@ export function DataDeckPage({
                     <div
                       key={d.id}
                       style={{
-                        display: "grid", gridTemplateColumns: "1fr 80px 70px 80px 130px",
+                        display: "grid", gridTemplateColumns: "1fr 80px 70px 80px 130px 90px",
                         padding: "12px 16px", alignItems: "center",
                         borderBottom: i < filteredDatasets.length - 1 ? `1px solid rgba(${MR},0.05)` : "none",
                         cursor: "default", transition: "background 0.12s",
@@ -683,6 +720,14 @@ export function DataDeckPage({
                       <span style={{ fontFamily: mono, fontSize: "0.64rem", color: "#6e6e76" }}>{fmt(d.sizeKb)}</span>
                       <span style={{ fontFamily: mono, fontSize: "0.64rem", color: "#6e6e76" }}>{d.rows ?? "—"}</span>
                       <span style={{ fontFamily: mono, fontSize: "0.62rem", color: "#6e6e76" }}>{fmtDate(d.uploadedAt)}</span>
+                      <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+                        <button onClick={() => openDataset(d)} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9a9aa2" }} title="Preview / edit">
+                          <Eye size={14} />
+                        </button>
+                        <button onClick={() => deleteDataset(d)} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#45454d" }} title="Delete">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -692,6 +737,7 @@ export function DataDeckPage({
         </main>
       </div>
 
+      {/* ── fetch-from-connection modal (multi-table select) ── */}
       {fetchModalOpen && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
           <div style={{ background: "#141418", borderRadius: "16px", border: `1px solid rgba(${MR},0.12)`, width: "420px", maxHeight: "80vh", overflowY: "auto", padding: "22px" }}>
@@ -714,7 +760,7 @@ export function DataDeckPage({
               <>
                 {connections.length === 0 ? (
                   <p style={{ fontFamily: share, fontSize: "0.62rem", color: "#6e6e76", lineHeight: 1.8, marginBottom: "16px" }}>
-                    No database connections yet.
+                    No tested-and-connected database connections yet. Set one up and test it in Connections first.
                   </p>
                 ) : (
                   <div style={{ display: "grid", gap: "8px", marginBottom: "16px" }}>
@@ -730,6 +776,7 @@ export function DataDeckPage({
                             const data = await res.json();
                             if (!res.ok) throw new Error(data.error || "Could not list tables.");
                             setTables(data.tables);
+                            setSelectedTables(new Set());
                             setFetchStep("pick-table");
                           } catch (e: any) {
                             setFetchError(e.message);
@@ -761,56 +808,86 @@ export function DataDeckPage({
               <p style={{ fontFamily: share, fontSize: "0.62rem", color: "#6e6e76", letterSpacing: "0.06em" }}>Loading…</p>
             )}
 
-            {/* step 3: pick table */}
+            {/* step 3: pick table(s) — multi-select */}
             {fetchStep === "pick-table" && (
               <>
                 <p style={{ fontFamily: share, fontSize: "0.58rem", color: "#6e6e76", marginBottom: "10px", letterSpacing: "0.06em" }}>
-                  {tables.length} table{tables.length !== 1 ? "s" : ""} found
+                  {tables.length} table{tables.length !== 1 ? "s" : ""} found — select one or more
                 </p>
                 <div style={{ display: "grid", gap: "6px", marginBottom: "16px", maxHeight: "260px", overflowY: "auto" }}>
-                  {tables.map((t) => (
-                    <button
-                      key={t}
-                      onClick={async () => {
-                        if (!selectedConnId || !selectedId) return;
-                        setFetchStep("loading");
-                        try {
+                  {tables.map((t) => {
+                    const isChecked = selectedTables.has(t);
+                    return (
+                      <button
+                        key={t}
+                        onClick={() => {
+                          setSelectedTables((prev) => {
+                            const next = new Set(prev);
+                            next.has(t) ? next.delete(t) : next.add(t);
+                            return next;
+                          });
+                        }}
+                        style={{
+                          display: "flex", alignItems: "center", gap: "8px",
+                          padding: "8px 12px", borderRadius: "6px",
+                          border: `1px solid ${isChecked ? `rgba(${MR},0.4)` : `rgba(${MR},0.08)`}`,
+                          background: isChecked ? `rgba(${MR},0.08)` : "#0d0d0f",
+                          color: "#e8e8ea", cursor: "pointer", textAlign: "left",
+                          fontFamily: mono, fontSize: "0.68rem",
+                        }}
+                      >
+                        <span style={{
+                          width: 14, height: 14, borderRadius: "4px", flexShrink: 0,
+                          border: `1px solid rgba(${MR},0.3)`, background: isChecked ? MINT : "transparent",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                        }}>
+                          {isChecked && <Check size={10} color="#0d0d0f" />}
+                        </span>
+                        {t}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <button
+                    disabled={selectedTables.size === 0}
+                    onClick={async () => {
+                      const target = currentTarget();
+                      if (!selectedConnId || !target || !profile?.id) return;
+                      setFetchStep("loading");
+                      try {
+                        for (const t of selectedTables) {
                           const res = await fetch(`/api/connections/${selectedConnId}/fetch`, {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ table: t, limit: 200 }),
+                            body: JSON.stringify({ table: t, limit: MAX_ROWS }),
                           });
                           const data = await res.json();
-                          if (!res.ok) throw new Error(data.error || "Fetch failed.");
+                          if (!res.ok) throw new Error(data.error || `Fetch failed for ${t}.`);
 
-                          const dataset: Dataset = {
-                            id: crypto.randomUUID(),
-                            name: t,
-                            type: "table",
-                            rows: data.totalRows,
-                            cols: data.columns.length,
-                            sizeKb: null,
-                            uploadedAt: new Date().toISOString(),
-                          };
-                          setProjects((prev) => addToNode(prev, selectedId, { dataset }));
-                          setFetchModalOpen(false);
-                        } catch (e: any) {
-                          setFetchError(e.message);
-                          setFetchStep("error");
+                          await fetch("/api/datasets", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              user_id: profile.id, project_id: target.project_id, folder_id: target.folder_id,
+                              name: t, type: "table", source: "connection", connection_id: selectedConnId,
+                              columns: data.columns, data: data.rows,
+                            }),
+                          });
                         }
-                      }}
-                      style={{
-                        padding: "8px 12px", borderRadius: "6px",
-                        border: `1px solid rgba(${MR},0.08)`, background: "#0d0d0f",
-                        color: "#e8e8ea", cursor: "pointer", textAlign: "left",
-                        fontFamily: mono, fontSize: "0.68rem",
-                      }}
-                    >
-                      {t}
-                    </button>
-                  ))}
+                        await loadTree();
+                        setFetchModalOpen(false);
+                      } catch (e: any) {
+                        setFetchError(e.message);
+                        setFetchStep("error");
+                      }
+                    }}
+                    style={{ ...mintBtn, opacity: selectedTables.size === 0 ? 0.4 : 1, cursor: selectedTables.size === 0 ? "default" : "pointer" }}
+                  >
+                    FETCH_SELECTED ({selectedTables.size})
+                  </button>
+                  <button onClick={() => setFetchStep("pick-connection")} style={ghostBtn}>← BACK</button>
                 </div>
-                <button onClick={() => setFetchStep("pick-connection")} style={ghostBtn}>← BACK</button>
               </>
             )}
 
@@ -818,6 +895,102 @@ export function DataDeckPage({
             {fetchStep === "error" && (
               <button onClick={() => setFetchStep("pick-connection")} style={ghostBtn}>← BACK</button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── preview / edit dataset modal ── */}
+      {activeDataset && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
+          <div style={{ background: "#141418", borderRadius: "16px", border: `1px solid rgba(${MR},0.12)`, width: "min(90vw, 900px)", maxHeight: "84vh", display: "flex", flexDirection: "column", padding: "20px" }}>
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <TypeIcon type={activeDataset.type} />
+                <span style={{ fontFamily: mono, fontSize: "0.78rem", color: "#e8e8ea" }}>{activeDataset.name}</span>
+              </div>
+              <button onClick={closeDatasetModal} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#45454d" }}>
+                <X size={16} />
+              </button>
+            </div>
+            <p style={{ fontFamily: share, fontSize: "0.56rem", color: "#45454d", marginBottom: "14px", letterSpacing: "0.06em" }}>
+              Showing first {Math.min(gridRows.length, 50)} of {activeDataset.rows ?? gridRows.length} rows.
+            </p>
+
+            {gridLoading ? (
+              <p style={{ fontFamily: share, fontSize: "0.62rem", color: "#6e6e76" }}>Loading…</p>
+            ) : gridColumns.length === 0 ? (
+              <p style={{ fontFamily: share, fontSize: "0.62rem", color: "#6e6e76" }}>No data stored for this dataset.</p>
+            ) : (
+              <div style={{ overflow: "auto", border: `1px solid rgba(${MR},0.07)`, borderRadius: "8px", flex: 1 }}>
+                <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                  <thead>
+                    <tr>
+                      {gridColumns.map((c) => (
+                        <th key={c} style={{
+                          position: "sticky", top: 0, background: "#1a1a20", textAlign: "left",
+                          padding: "8px 12px", fontFamily: share, fontSize: "0.54rem",
+                          letterSpacing: "0.06em", color: "#9a9aa2", whiteSpace: "nowrap",
+                          borderBottom: `1px solid rgba(${MR},0.1)`,
+                        }}>
+                          {c}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gridRows.map((row, ri) => (
+                      <tr key={ri}>
+                        {gridColumns.map((c) => (
+                          <td key={c} style={{ borderBottom: `1px solid rgba(${MR},0.04)`, padding: "0" }}>
+                            {gridEditing ? (
+                              <input
+                                value={row[c] ?? ""}
+                                onChange={(e) => updateCell(ri, c, e.target.value)}
+                                style={{
+                                  width: "100%", background: "transparent", border: "none", outline: "none",
+                                  padding: "7px 12px", fontFamily: mono, fontSize: "0.66rem", color: "#e8e8ea",
+                                }}
+                              />
+                            ) : (
+                              <span style={{ display: "block", padding: "7px 12px", fontFamily: mono, fontSize: "0.66rem", color: "#c8c8ce", whiteSpace: "nowrap" }}>
+                                {String(row[c] ?? "")}
+                              </span>
+                            )}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: "10px", marginTop: "16px" }}>
+              {gridEditing ? (
+                <>
+                  <button
+                    onClick={saveGridEdits}
+                    disabled={gridSaving}
+                    style={{ ...mintBtn, opacity: gridSaving ? 0.6 : 1 }}
+                  >
+                    <Save size={12} /> {gridSaving ? "SAVING…" : "SAVE_CHANGES"}
+                  </button>
+                  <button onClick={() => { setGridEditing(false); openDataset(activeDataset); }} style={ghostBtn}>
+                    CANCEL
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button onClick={() => setGridEditing(true)} style={ghostBtn}>
+                    <Pencil size={12} /> EDIT
+                  </button>
+                  <button onClick={() => deleteDataset(activeDataset)} style={{ ...ghostBtn, color: "#ED93B1", borderColor: "rgba(237,147,177,0.25)" }}>
+                    <Trash2 size={12} /> DELETE
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
